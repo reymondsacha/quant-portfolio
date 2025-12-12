@@ -1,57 +1,27 @@
-import pandas as pd
-import numpy as np
-import yfinance as yf
-from typing import List, Optional
-from pandas.errors import EmptyDataError
-from datetime import datetime
+# src/data_loader.py - REFACTORED (Stateless and SRP Compliant)
 
+import pandas as pd
+import yfinance as yf
+from pandas.errors import EmptyDataError
+from typing import List
+import logging
+import datetime # Need to import datetime for validation
+
+logger = logging.getLogger(__name__)
 
 class YahooDownloader:
     """
-    Production-grade Yahoo Finance Data Downloader.
-
-    This class fetches historical financial data for given tickers using yfinance,
-    validates input dates, and allows saving the data in Parquet format.
-
-    Attributes:
-        tickers (List[str]): List of ticker symbols to fetch.
-        start_date (str): Start date in 'YYYY-MM-DD' format.
-        end_date (str): End date in 'YYYY-MM-DD' format.
-        data (Optional[pd.DataFrame]): Fetched data, indexed by date.
+    Stateless Yahoo Finance Data Downloader.
+    
+    Responsible only for fetching historical data for a single ticker and period, 
+    and returning the DataFrame payload. It performs defensive data cleaning.
     """
 
-    def __init__(self, tickers: List[str], start_date: str, end_date: str) -> None:
-        """
-        Initialize the YahooDownloader.
-
-        Args:
-            tickers (List[str]): List of ticker symbols.
-            start_date (str): Start date (inclusive) in 'YYYY-MM-DD' format.
-            end_date (str): End date (inclusive) in 'YYYY-MM-DD' format.
-
-        Raises:
-            ValueError: If dates are invalid or if tickers is empty.
-        """
-        self._validate_tickers(tickers)
-        self._validate_date_format(start_date)
-        self._validate_date_format(end_date)
-        self._validate_date_order(start_date, end_date)
-
-        self.tickers: List[str] = tickers
-        self.start_date: str = start_date
-        self.end_date: str = end_date
-        self.data: Optional[pd.DataFrame] = None
-
+    # --- Validation Methods (KEEP THESE, they are excellent utility methods) ---
     @staticmethod
     def _validate_tickers(tickers: List[str]) -> None:
-        """
-        Validates the tickers input.
-
-        Args:
-            tickers (List[str]): List of ticker symbols.
-        Raises:
-            ValueError: If the list is empty or contains non-str elements.
-        """
+        # Note: Now used to validate the *input* list in fetch_history, if we designed it that way, 
+        # but since we call yf.download with a single string, we adapt the logic.
         if not isinstance(tickers, list) or not tickers:
             raise ValueError("Tickers must be a non-empty list of strings.")
         if not all(isinstance(t, str) and t.strip() for t in tickers):
@@ -59,114 +29,80 @@ class YahooDownloader:
 
     @staticmethod
     def _validate_date_format(date_str: str) -> None:
-        """
-        Validates the date format.
-
-        Args:
-            date_str (str): Date string.
-
-        Raises:
-            ValueError: If the date_str is not in 'YYYY-MM-DD' format.
-        """
         try:
-            datetime.strptime(date_str, "%Y-%m-%d")
+            datetime.datetime.strptime(date_str, "%Y-%m-%d")
         except Exception as e:
             raise ValueError(f"Date '{date_str}' is not in 'YYYY-MM-DD' format.") from e
 
     @staticmethod
     def _validate_date_order(start_date: str, end_date: str) -> None:
-        """
-        Validates that start_date is before or equal to end_date.
-
-        Args:
-            start_date (str): Start date.
-            end_date (str): End date.
-
-        Raises:
-            ValueError: If start_date > end_date.
-        """
-        start = datetime.strptime(start_date, "%Y-%m-%d")
-        end = datetime.strptime(end_date, "%Y-%m-%d")
+        start = datetime.datetime.strptime(start_date, "%Y-%m-%d")
+        end = datetime.datetime.strptime(end_date, "%Y-%m-%d")
         if start > end:
             raise ValueError("start_date must be before or equal to end_date.")
-
-    def fetch(self) -> None:
+    # ------------------------------------------------------------------------
+    
+    def fetch_history(
+        self, 
+        ticker: str, 
+        start_date: str, 
+        end_date: str
+    ) -> pd.DataFrame:
         """
-        Fetch historical market data for defined tickers and period using yfinance.
-
+        Fetch historical market data for a SINGLE ticker and period using yfinance.
+        
+        Args:
+            ticker (str): The single ticker symbol.
+            start_date (str): Start date (inclusive) in 'YYYY-MM-DD' format.
+            end_date (str): End date (inclusive) in 'YYYY-MM-DD' format.
+            
         Returns:
-            None
-
-        Raises:
-            RuntimeError: If no data was returned for any given ticker.
+            pd.DataFrame: The fetched data (or an empty DF if not found).
         """
+        # Validate the specific call arguments
+        # Since we removed __init__, validation moves to the fetch method.
+        # Note: You can skip date validation if you're sure main.py provides good input, 
+        # but for robustness, it stays.
+        self._validate_date_format(start_date)
+        self._validate_date_format(end_date)
+        self._validate_date_order(start_date, end_date)
+        
         try:
+            # yfinance call now uses the passed arguments
             df = yf.download(
-                tickers=" ".join(self.tickers),
-                start=self.start_date,
-                end=self.end_date,
+                tickers=ticker, # <--- Single ticker passed as string
+                start=start_date,
+                end=end_date,
                 auto_adjust=True,
                 progress=False,
-                group_by="ticker",
+                group_by="ticker", # Keep the MultiIndex (Field, Ticker) structure
             )
+            
             if df.empty:
                 raise EmptyDataError("No data returned from Yahoo Finance.")
 
-            # Restructure DataFrame: rows -> date, columns -> MultiIndex (Ticker, Field)
-            if len(self.tickers) == 1:
-                # Consistent MultiIndex structure even for single ticker
-                df.columns = pd.MultiIndex.from_product([self.tickers, df.columns])
+            # --- DEFENSIVE MULTIINDEX FIX (Kept from your final working code) ---
+            if isinstance(df.columns, pd.MultiIndex):
+                # Flatten (Field, Ticker) into (Ticker, Field) and sort
+                df.columns = df.columns.swaplevel(0, 1)
+                df = df.sort_index(axis=1)
+            # ------------------------------------------------------------------
 
-            self.data = df
+            # If it's a single ticker, we ensure it's wrapped in a MultiIndex 
+            # to be consistent with the multi-ticker output structure, 
+            # as your original code intended (though this might be simplified later).
+            # We keep the structure that passed your 100% tests.
+            if not isinstance(df.columns, pd.MultiIndex):
+                 # This handles the case where yfinance gives simple columns for a single ticker
+                 df.columns = pd.MultiIndex.from_product([[ticker], df.columns])
+                 
+            return df # <--- KEY CHANGE: Returns the DataFrame payload
+            
         except EmptyDataError as e:
-            raise RuntimeError(
-                "No data found for the specified tickers and dates."
-            ) from e
+            # Return an empty DataFrame on failure so the orchestrator can continue
+            return pd.DataFrame() 
         except Exception as e:
-            raise RuntimeError(f"Failed to fetch data from Yahoo Finance: {e}") from e
+            raise RuntimeError(f"Failed to fetch data from Yahoo Finance for {ticker}: {e}") from e
 
-    def save_to_parquet(self, filename: str) -> None:
-        """
-        Save the fetched data to Parquet format.
-
-        Args:
-            filename (str): Destination file path (must end with .parquet).
-
-        Raises:
-            ValueError: If data has not been fetched yet.
-            RuntimeError: If saving fails.
-        """
-        if self.data is None or self.data.empty:
-            raise ValueError(
-                "No data to save. Call fetch() successfully before saving."
-            )
-        if not filename.endswith(".parquet"):
-            raise ValueError("Filename must end with .parquet")
-        try:
-            self.data.to_parquet(filename, engine="pyarrow")
-        except Exception as e:
-            raise RuntimeError(f"Failed to save data to Parquet: {e}") from e
-
-
-if __name__ == "__main__":
-    # Test the downloader
-    print("Testing YahooDownloader...")
-
-    # 1. Define parameters
-    tickers = ["AAPL", "MSFT", "GOOGL"]
-    start = "2020-01-01"
-    end = "2023-12-31"
-
-    # 2. Instantiate and fetch
-    downloader = YahooDownloader(tickers, start, end)
-    print(f"Fetching data for {tickers}...")
-    downloader.fetch()
-
-    # 3. Inspect data
-    print("Data fetched successfully!")
-    print(f"Shape: {downloader.data.shape}")
-    print(downloader.data.head())
-
-    # 4. Test Save
-    downloader.save_to_parquet("market_data.parquet")
-    print("Saved to market_data.parquet")
+# --- The __init__ and save_to_parquet methods and the __main__ block are REMOVED ---
+# --- The original class attributes (self.tickers, self.data) are REMOVED ---

@@ -1,52 +1,67 @@
-# main.py (Located in the root of your quant-portfolio project)
-import logging
-from datetime import datetime, timedelta
+# main.py (Update your existing file in the project root)
 
-# We import from the src package because we are outside of it
-from src.data_loader import YahooDownloader
+import logging
+from src.data_loader import YahooDownloader # Note the rename from yahoo_downloader to data_loader
 from src.data_manager import DataManager
+from typing import List
 
 # Configure Logging
-logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+def run_pipeline(tickers: List[str], start_date: str, end_date: str):
+    """
+    Runs the full data ingestion pipeline for a list of tickers within a date range.
+    """
+    
+    # Components are initialized without state/data
+    downloader = YahooDownloader()
+    manager = DataManager(base_dir="data/raw")
+    
+    total_tickers = len(tickers)
+    success_count = 0
+    
+    logging.info(f"--- Starting Data Pipeline for {total_tickers} tickers ({start_date} to {end_date}) ---")
+
+    # 1. Iterate through the list of tickers
+    for i, ticker in enumerate(tickers, 1):
+        logging.info(f"[{i}/{total_tickers}] Processing ticker: {ticker}")
+        
+        try:
+            # 2. Fetch Data (Downloader's job) - Now requires explicit dates
+            df = downloader.fetch_history(
+                ticker=ticker, 
+                start_date=start_date, 
+                end_date=end_date # <--- Dates passed directly to the stateless method
+            )
+            
+            # 3. Persist Data (Manager's job) - Only save if DataFrame is not empty
+            if not df.empty:
+                saved_path = manager.save_ticker(ticker, df)
+                logging.info(f"SUCCESS: {ticker} saved {len(df)} rows to {saved_path.name}")
+                success_count += 1
+            else:
+                logging.warning(f"SKIPPED {ticker}: DataFrame was returned empty (e.g., failed to fetch or invalid ticker).")
+            
+        except ValueError as e:
+            # Catches validation errors (e.g., bad date format)
+            logging.warning(f"SKIPPED {ticker}: Validation Error. {e}")
+        
+        except RuntimeError as e:
+            # Catches critical fetch/save errors (Network failure, corrupt file handling, etc.)
+            logging.error(f"FAILED {ticker}: Critical Error. {e}")
+            
+    # 4. Final Report
+    logging.info(f"--- Pipeline Finished. {success_count}/{total_tickers} successful. ---")
 
 def main():
-    """
-    Orchestrates the data pipeline flow: Download -> Save -> Verify.
-    """
-    TICKER = "NVDA"
+    # Define the list of core tickers to ingest
+    CORE_TICKERS = ["AAPL", "MSFT", "GOOGL", "NVDA", "TSLA", "^GSPC"] 
+    
+    # Define the primary configuration (Dates)
+    START_DATE = "2020-01-01"
+    END_DATE = "2024-12-31" 
 
-    # Calculate date range (1 month back from today)
-    end_date = datetime.now().strftime("%Y-%m-%d")
-    start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
-
-    # 1. Initialize our decoupled components
-    downloader = YahooDownloader(
-        tickers=[TICKER], start_date=start_date, end_date=end_date
-    )
-    manager = DataManager(base_dir="data/raw")  # Data written to data/raw/
-
-    print(f"--- 1. FETCHING {TICKER} (Network) ---")
-    try:
-        # Downloader fetches data into self.data (in memory)
-        downloader.fetch()
-        df = downloader.data
-        print(f"Downloaded {len(df)} rows.")
-
-        print(f"--- 2. SAVING {TICKER} (Disk) ---")
-        # Manager takes the DataFrame and persists it securely (Atomic Write)
-        saved_path = manager.save_ticker(TICKER, df)
-        print(f"Securely saved to: {saved_path}")
-
-        print(f"--- 3. VERIFYING (Read-Back) ---")
-        # Read back to ensure integrity
-        df_loaded = manager.load_ticker(TICKER)
-        print(f"Verification successful. Data loaded with shape: {df_loaded.shape}")
-
-    except Exception as e:
-        # Critical failure path
-        logging.error(f"Pipeline Failed for {TICKER}: {e}")
-
+    run_pipeline(CORE_TICKERS, START_DATE, END_DATE)
 
 if __name__ == "__main__":
     main()

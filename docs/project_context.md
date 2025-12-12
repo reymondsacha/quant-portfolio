@@ -1,5 +1,6 @@
 # Quant Portfolio - Project Context
-
+New-Item tests/__init__.py -ItemType File
+New-Item tests/test_data_loader.py -ItemType File
 ## User Profile
 - **Background:** Classes Prépas (Stanislas MP*). Strong mathematical foundation (Measure Theory, Algebra).
 - **Goal:** Admission to El Karoui / Lamberton & Tier-1 Quant roles.

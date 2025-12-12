@@ -71,9 +71,7 @@ class YahooDownloader:
         try:
             datetime.strptime(date_str, "%Y-%m-%d")
         except Exception as e:
-            raise ValueError(
-                f"Date '{date_str}' is not in 'YYYY-MM-DD' format."
-            ) from e
+            raise ValueError(f"Date '{date_str}' is not in 'YYYY-MM-DD' format.") from e
 
     @staticmethod
     def _validate_date_order(start_date: str, end_date: str) -> None:
@@ -121,7 +119,9 @@ class YahooDownloader:
 
             self.data = df
         except EmptyDataError as e:
-            raise RuntimeError("No data found for the specified tickers and dates.") from e
+            raise RuntimeError(
+                "No data found for the specified tickers and dates."
+            ) from e
         except Exception as e:
             raise RuntimeError(f"Failed to fetch data from Yahoo Finance: {e}") from e
 
@@ -151,22 +151,22 @@ class YahooDownloader:
 if __name__ == "__main__":
     # Test the downloader
     print("Testing YahooDownloader...")
-    
+
     # 1. Define parameters
     tickers = ["AAPL", "MSFT", "GOOGL"]
     start = "2020-01-01"
     end = "2023-12-31"
-    
+
     # 2. Instantiate and fetch
     downloader = YahooDownloader(tickers, start, end)
     print(f"Fetching data for {tickers}...")
     downloader.fetch()
-    
+
     # 3. Inspect data
     print("Data fetched successfully!")
     print(f"Shape: {downloader.data.shape}")
     print(downloader.data.head())
-    
+
     # 4. Test Save
     downloader.save_to_parquet("market_data.parquet")
     print("Saved to market_data.parquet")

@@ -29,8 +29,19 @@ class DataManager:
         if df.empty:
             raise ValueError(f"Cannot save empty dataframe for ticker '{ticker}'.")
 
-        file_path: Path = self.base_dir / f"{ticker}.parquet"
-        temp_path: Path = self.base_dir / f"{ticker}.parquet.tmp"
+        # 1. Extract partition keys
+        start_date = df.index[0]
+        year = start_date.year
+        month = f"{start_date.month:02d}"
+
+        # 2. Construct the partition Directory (Hive style)
+        partition_dir: Path = self.base_dir / ticker / f"year={year}" / f"month={month}"
+
+        file_path: Path = partition_dir / "data.parquet"
+        temp_path: Path = partition_dir / "data.parquet.tmp"
+
+        # Create all necessary parent directories
+        partition_dir.mkdir(parents=True, exist_ok=True)
 
         try:
             # 1. Write to temporary file
@@ -57,19 +68,37 @@ class DataManager:
     def load_ticker(self, ticker: str) -> pd.DataFrame:
         """
         Load a ticker's data from Parquet format.
-        """
-        file_path: Path = self.base_dir / f"{ticker}.parquet"
 
-        if not file_path.exists():
+        The pyarrow engine automatically discovers and reads all files
+        within the ticker's root directory, handling partition discovery.
+        """
+
+        # 1. Define the ticket root directory path
+        ticker_root_path: Path = self.base_dir / ticker
+
+        # 2. Check if the ticker root directory exists
+        if not ticker_root_path.is_dir():
             raise FileNotFoundError(
-                f"Ticker '{ticker}' not found. Available: {self.list_existing_tickers()}"
+                f"Ticker data directory '{ticker}' not found at {ticker_root_path}."
             )
 
         try:
-            return pd.read_parquet(file_path, engine="pyarrow")
+            # 3. load the partitioned dataset
+            # Pointing pandas.read_parquet to a directory tells the pyarrow engine
+            # to load the entire dataset, automatically handling the partition columns.
+            df = pd.read_parquet(ticker_root_path, engine="pyarrow")
+            return df
+
         except Exception as e:
             raise RuntimeError(f"Corrupt data for '{ticker}': {e}") from e
 
     def list_existing_tickers(self) -> List[str]:
-        """List all tickers saved in the directory."""
-        return sorted([f.stem for f in self.base_dir.glob("*.parquet")])
+        """List all tickers saved as root directories in the partitioned structure."""
+        return sorted(
+            [
+                f.name  # get the directory name
+                for f in self.base_dir.iterdir()
+                if f.is_dir()
+                and f.name != "__pycache__"  # Excluse non-ticker directories
+            ]
+        )

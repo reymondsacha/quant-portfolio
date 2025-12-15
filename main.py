@@ -3,7 +3,7 @@
 import logging
 from src.data_loader import (
     YahooDownloader,
-)  # Note the rename from yahoo_downloader to data_loader
+)
 from src.data_manager import DataManager
 from typing import List
 

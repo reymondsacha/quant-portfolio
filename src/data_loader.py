@@ -82,6 +82,10 @@ class YahooDownloader:
                 raise EmptyDataError("No data returned from Yahoo Finance.")
 
             if df.empty:
+                # LOG WARNING before raising EmptyDataError for internal checks
+                logger.warning(
+                    f"No data returned from Yahoo Finance for {ticker}. Returning empty DataFrame."
+                )
                 raise EmptyDataError("No data returned from Yahoo Finance.")
 
             # --- DEFENSIVE MULTIINDEX FIX (Kept from your final working code) ---
@@ -103,8 +107,16 @@ class YahooDownloader:
 
         except EmptyDataError:
             # Return an empty DataFrame on failure so the orchestrator can continue
+            logger.warning(
+                f"Returning empty DataFrame after EmptyDataError for {ticker}."
+            )
             return pd.DataFrame()
+
         except Exception as e:
+            # LOG ERROR before raising RuntimeError for critical failures
+            logger.error(
+                f"Critical failure fetching data for {ticker}: {e}", exc_info=True
+            )
             raise RuntimeError(
                 f"Failed to fetch data from Yahoo Finance for {ticker}: {e}"
             ) from e

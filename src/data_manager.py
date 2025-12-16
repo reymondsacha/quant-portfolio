@@ -2,7 +2,7 @@
 
 import pandas as pd
 from pathlib import Path
-from typing import List
+from typing import List, cast
 
 
 class DataManager:
@@ -28,42 +28,58 @@ class DataManager:
         """
         if df.empty:
             raise ValueError(f"Cannot save empty dataframe for ticker '{ticker}'.")
+        
 
-        # 1. Extract partition keys
-        start_date = df.index[0]
-        year = start_date.year
-        month = f"{start_date.month:02d}"
+        monthly_groups = df.groupby(pd.Grouper(freq='ME'))
 
-        # 2. Construct the partition Directory (Hive style)
-        partition_dir: Path = self.base_dir / ticker / f"year={year}" / f"month={month}"
+        for period, chunk in monthly_groups:
+            if chunk.empty:
+                continue
+            # 1. Extract partition keys (ensure the index is datetime-like for type checkers)
+            #
+            # Pyright (and pandas stubs) treat `DataFrame.index` as a generic `pd.Index`,
+            # so `df.index[0].year` / `.month` is flagged unless we explicitly narrow.
+            dt_index: pd.DatetimeIndex = pd.DatetimeIndex(pd.to_datetime(chunk.index))
+            raw_start = dt_index.min()
+            if raw_start is pd.NaT:
+                raise ValueError(
+                    f"Ticker '{ticker}' has an invalid datetime index (NaT encountered)."
+                )
+            start_ts: pd.Timestamp = cast(pd.Timestamp, raw_start)
+            year: int = int(start_ts.year)
+            month: str = f"{int(start_ts.month):02d}"
 
-        file_path: Path = partition_dir / "data.parquet"
-        temp_path: Path = partition_dir / "data.parquet.tmp"
+            # 2. Construct the partition Directory (Hive style)
+            partition_dir: Path = self.base_dir / ticker / f"year={year}" / f"month={month}"
 
-        # Create all necessary parent directories
-        partition_dir.mkdir(parents=True, exist_ok=True)
+            file_path: Path = partition_dir / "data.parquet"
+            temp_path: Path = partition_dir / "data.parquet.tmp"
 
-        try:
-            # 1. Write to temporary file
-            df.to_parquet(
-                temp_path,
-                engine="pyarrow",
-                compression="snappy",
-                index=True,  # Explicitly preserve the Date index
-            )
+            # Create all necessary parent directories
+            partition_dir.mkdir(parents=True, exist_ok=True)
 
-            # 2. Atomic Rename (The Swap)
-            temp_path.replace(file_path)
-            return file_path
+            try:
+                # 1. Write to temporary file
+                chunk.to_parquet(
+                    temp_path,
+                    engine="pyarrow",
+                    compression="snappy",
+                    index=True,  # Explicitly preserve the Date index
+                )
 
-        except Exception as e:
-            # Cleanup garbage if write failed
-            if temp_path.exists():
-                temp_path.unlink()
+                # 2. Atomic Rename (The Swap)
+                temp_path.replace(file_path)
 
-            raise RuntimeError(
-                f"Failed to save ticker '{ticker}' to {file_path}: {e}"
-            ) from e
+            except Exception as e:
+                # Cleanup garbage if write failed
+                if temp_path.exists():
+                    temp_path.unlink()
+
+                raise RuntimeError(
+                    f"Failed to save ticker '{ticker}' to {file_path}: {e}"
+                ) from e
+        return self.base_dir / ticker
+        
 
     def load_ticker(self, ticker: str) -> pd.DataFrame:
         """
@@ -99,6 +115,7 @@ class DataManager:
                 f.name  # get the directory name
                 for f in self.base_dir.iterdir()
                 if f.is_dir()
+                and not f.name.startswith(".")
                 and f.name != "__pycache__"  # Excluse non-ticker directories
             ]
         )

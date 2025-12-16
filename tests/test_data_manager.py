@@ -42,17 +42,21 @@ def test_save_and_load_ticker(tmp_path: Path, sample_dataframe: pd.DataFrame):
     # Check return value and existence
     assert isinstance(saved_path, Path)
     assert saved_path.exists()
-    assert saved_path.name == f"{ticker}.parquet"
+    assert saved_path.is_dir()
+    assert saved_path.name == "TSLA"
 
+    partition_dir = saved_path / "year=2023" / "month=01"
     # Check for temporary file (should NOT exist after successful save)
-    temp_path = manager.base_dir / f"{ticker}.parquet.tmp"
+    temp_path = partition_dir / "data.parquet.tmp"
     assert not temp_path.exists(), "Temporary file should be removed or renamed."
 
+    file_path = partition_dir / "data.parquet"
+    assert file_path.exists(), "The partition file was created"
     # 2. Test Load
     df_loaded = manager.load_ticker(ticker)
-
+    df_loaded = df_loaded[sample_dataframe.columns]
     # Check data integrity
-    pd.testing.assert_frame_equal(sample_dataframe, df_loaded)
+    pd.testing.assert_frame_equal(sample_dataframe, df_loaded, check_freq=False)
 
 
 def test_save_empty_dataframe_raises_error(tmp_path: Path):
@@ -94,15 +98,17 @@ def test_atomic_write_cleanup_on_failure(tmp_path: Path, mocker):
     """Simulate a failure during the to_parquet call and check for cleanup."""
     manager = DataManager(base_dir=str(tmp_path / "fail_test"))
     ticker = "FAIL"
-    df = pd.DataFrame({"col": [1]})  # Simple DataFrame
+    df = pd.DataFrame({"col": [1]}, index=pd.to_datetime(["2023-01-01"]))  # Simple DataFrame
 
-    temp_path = manager.base_dir / f"{ticker}.parquet.tmp"
-    final_path = manager.base_dir / f"{ticker}.parquet"
+    partition_dir = manager.base_dir / ticker / "year=2023" / "month=01"
+    temp_path = partition_dir / "data.parquet.tmp"
+    final_path = partition_dir / "data.parquet"
 
     # Mock the to_parquet function to raise an error
     # We must ensure the .tmp file is created BEFORE the mock raises the error.
 
     def mocked_to_parquet(*args, **kwargs):
+        partition_dir.mkdir(parents=True, exist_ok=True) 
         # Manually create the temporary file before raising
         temp_path.touch()
         raise OSError("Simulated Disk Full Error")
@@ -128,7 +134,9 @@ def test_load_corrupt_ticker_raises_runtime_error(tmp_path: Path):
     """
     manager = DataManager(base_dir=str(tmp_path / "storage"))
     ticker = "CORRUPT"
-    file_path: Path = manager.base_dir / f"{ticker}.parquet"
+    partition_dir = manager.base_dir / ticker / "year=2023" / "month=01"
+    file_path: Path = partition_dir / "data.parquet"
+    partition_dir.mkdir(parents = True, exist_ok = True)
 
     # 1. Create a file that exists but contains non-Parquet (corrupt) data
     # We write simple text data, which pandas will fail to parse as Parquet.

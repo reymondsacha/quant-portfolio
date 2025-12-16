@@ -1,15 +1,24 @@
 # main.py (Update your existing file in the project root)
 
 import logging
-from src.data_loader import (
+from pathlib import Path
+from src.data_downloader import (
     YahooDownloader,
 )
 from src.data_manager import DataManager
 from typing import List
 
-# Configure Logging
+# Ensure logs directory exists
+Path("logs").mkdir(exist_ok=True)
+
+# Configure Logging with both console and file handlers
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler("logs/pipeline.log", mode="w"),
+        logging.StreamHandler(),  # Console output
+    ],
 )
 
 
@@ -26,12 +35,15 @@ def run_pipeline(tickers: List[str], start_date: str, end_date: str):
     success_count = 0
 
     logging.info(
-        f"--- Starting Data Pipeline for {total_tickers} tickers ({start_date} to {end_date}) ---"
+        "--- Starting Data Pipeline for %d tickers (%s to %s) ---",
+        total_tickers,
+        start_date,
+        end_date,
     )
 
     # 1. Iterate through the list of tickers
     for i, ticker in enumerate(tickers, 1):
-        logging.info(f"[{i}/{total_tickers}] Processing ticker: {ticker}")
+        logging.info("[%d/%d] Processing ticker: %s", i, total_tickers, ticker)
 
         try:
             # 2. Fetch Data (Downloader's job) - Now requires explicit dates
@@ -45,34 +57,35 @@ def run_pipeline(tickers: List[str], start_date: str, end_date: str):
             if not df.empty:
                 saved_path = manager.save_ticker(ticker, df)
                 logging.info(
-                    f"SUCCESS: {ticker} saved {len(df)} rows to {saved_path.name}"
+                    "SUCCESS: %s saved %d rows to %s", ticker, len(df), saved_path.name
                 )
                 success_count += 1
             else:
                 logging.warning(
-                    f"SKIPPED {ticker}: DataFrame was returned empty (e.g., failed to fetch or invalid ticker)."
+                    "SKIPPED %s: DataFrame was returned empty (e.g., failed to fetch or invalid ticker).",
+                    ticker,
                 )
 
         except ValueError as e:
             # Catches validation errors (e.g., bad date format)
-            logging.warning(f"SKIPPED {ticker}: Validation Error. {e}")
+            logging.warning("SKIPPED %s: Validation Error. %s", ticker, e)
 
         except RuntimeError as e:
             # Catches critical fetch/save errors (Network failure, corrupt file handling, etc.)
-            logging.error(f"FAILED {ticker}: Critical Error. {e}")
+            logging.error("FAILED %s: Critical Error. %s", ticker, e)
 
     # 4. Final Report
     logging.info(
-        f"--- Pipeline Finished. {success_count}/{total_tickers} successful. ---"
+        "--- Pipeline Finished. %d/%d successful. ---", success_count, total_tickers
     )
 
 
 def main():
     # Define the list of core tickers to ingest
-    CORE_TICKERS = ["AAPL", "MSFT", "GOOGL", "NVDA", "TSLA", "^GSPC"]
+    CORE_TICKERS = ["AAPL", "MSFT", "GOOGL", "NVDA", "TSLA", "^GSPC", "AMZN", "META"]
 
     # Define the primary configuration (Dates)
-    START_DATE = "2020-01-01"
+    START_DATE = "1970-01-01"
     END_DATE = "2024-12-31"
 
     run_pipeline(CORE_TICKERS, START_DATE, END_DATE)

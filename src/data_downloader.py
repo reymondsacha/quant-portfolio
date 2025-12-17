@@ -6,6 +6,8 @@ from pandas.errors import EmptyDataError
 from typing import List
 import logging
 import datetime  # Need to import datetime for validation
+from src.utils import retry, SymbolNotFoundError
+
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +45,7 @@ class YahooDownloader:
             raise ValueError("start_date must be before or equal to end_date.")
 
     # ------------------------------------------------------------------------
-
+    @retry(retries=3, delay=1, backoff=2)
     def fetch_history(
         self, ticker: str, start_date: str, end_date: str
     ) -> pd.DataFrame:
@@ -79,20 +81,20 @@ class YahooDownloader:
 
             # Defensive check: Ensure df is not None and is a DataFrame
             if df is None or not isinstance(df, pd.DataFrame):
-                raise EmptyDataError("No data returned from Yahoo Finance.")
+                raise SymbolNotFoundError(ticker, "No data returned from Yahoo Finance.")
 
             if df.empty:
                 # LOG WARNING before raising EmptyDataError for internal checks
                 logger.warning(
                     f"No data returned from Yahoo Finance for {ticker}. Returning empty DataFrame."
                 )
-                raise EmptyDataError("No data returned from Yahoo Finance.")
+                raise SymbolNotFoundError(ticker,"No data returned from Yahoo Finance.") 
 
             # --- DEFENSIVE MULTIINDEX FIX (Kept from your final working code) ---
             if isinstance(df.columns, pd.MultiIndex):
                 level0 = df.columns.levels[0]
 
-                #Heuristic
+                # Heuristic
                 known_fields = ["Open", "High", "Low", "Close", "Volume"]
                 if set(level0) & set(known_fields):
                     df.columns = df.columns.swaplevel(0, 1)
@@ -105,14 +107,16 @@ class YahooDownloader:
             # We keep the structure that passed your 100% tests.
             if not isinstance(df.columns, pd.MultiIndex):
                 # This handles the case where yfinance gives simple columns for a single ticker
-                df.columns = pd.MultiIndex.from_product([[ticker], df.columns], names=["Ticker", "Field"])
+                df.columns = pd.MultiIndex.from_product(
+                    [[ticker], df.columns], names=["Ticker", "Field"]
+                )
 
             return df  # <--- KEY CHANGE: Returns the DataFrame payload
 
-        except EmptyDataError:
+        except SymbolNotFoundError:
             # Return an empty DataFrame on failure so the orchestrator can continue
             logger.warning(
-                f"Returning empty DataFrame after EmptyDataError for {ticker}."
+                f"Returning empty DataFrame for invalid symbol : {ticker}."
             )
             return pd.DataFrame()
 

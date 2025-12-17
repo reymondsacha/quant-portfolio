@@ -98,7 +98,9 @@ def test_atomic_write_cleanup_on_failure(tmp_path: Path, mocker):
     """Simulate a failure during the to_parquet call and check for cleanup."""
     manager = DataManager(base_dir=str(tmp_path / "fail_test"))
     ticker = "FAIL"
-    df = pd.DataFrame({"col": [1]}, index=pd.to_datetime(["2023-01-01"]))  # Simple DataFrame
+    df = pd.DataFrame(
+        {"col": [1]}, index=pd.to_datetime(["2023-01-01"])
+    )  # Simple DataFrame
 
     partition_dir = manager.base_dir / ticker / "year=2023" / "month=01"
     temp_path = partition_dir / "data.parquet.tmp"
@@ -108,7 +110,7 @@ def test_atomic_write_cleanup_on_failure(tmp_path: Path, mocker):
     # We must ensure the .tmp file is created BEFORE the mock raises the error.
 
     def mocked_to_parquet(*args, **kwargs):
-        partition_dir.mkdir(parents=True, exist_ok=True) 
+        partition_dir.mkdir(parents=True, exist_ok=True)
         # Manually create the temporary file before raising
         temp_path.touch()
         raise OSError("Simulated Disk Full Error")
@@ -136,7 +138,7 @@ def test_load_corrupt_ticker_raises_runtime_error(tmp_path: Path):
     ticker = "CORRUPT"
     partition_dir = manager.base_dir / ticker / "year=2023" / "month=01"
     file_path: Path = partition_dir / "data.parquet"
-    partition_dir.mkdir(parents = True, exist_ok = True)
+    partition_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Create a file that exists but contains non-Parquet (corrupt) data
     # We write simple text data, which pandas will fail to parse as Parquet.

@@ -28,9 +28,8 @@ class DataManager:
         """
         if df.empty:
             raise ValueError(f"Cannot save empty dataframe for ticker '{ticker}'.")
-        
 
-        monthly_groups = df.groupby(pd.Grouper(freq='ME'))
+        monthly_groups = df.groupby(pd.Grouper(freq="ME"))
 
         for period, chunk in monthly_groups:
             if chunk.empty:
@@ -50,7 +49,9 @@ class DataManager:
             month: str = f"{int(start_ts.month):02d}"
 
             # 2. Construct the partition Directory (Hive style)
-            partition_dir: Path = self.base_dir / ticker / f"year={year}" / f"month={month}"
+            partition_dir: Path = (
+                self.base_dir / ticker / f"year={year}" / f"month={month}"
+            )
 
             file_path: Path = partition_dir / "data.parquet"
             temp_path: Path = partition_dir / "data.parquet.tmp"
@@ -79,7 +80,6 @@ class DataManager:
                     f"Failed to save ticker '{ticker}' to {file_path}: {e}"
                 ) from e
         return self.base_dir / ticker
-        
 
     def load_ticker(self, ticker: str) -> pd.DataFrame:
         """

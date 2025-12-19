@@ -45,7 +45,7 @@ class YahooDownloader:
             raise ValueError("start_date must be before or equal to end_date.")
 
     # ------------------------------------------------------------------------
-    @retry(retries=3, delay=1, backoff=2)
+    @retry(retries=3, delay=2, backoff=2)
     def fetch_history(
         self, ticker: str, start_date: str, end_date: str
     ) -> pd.DataFrame:

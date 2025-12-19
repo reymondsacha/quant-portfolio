@@ -20,8 +20,14 @@ class DataManager:
         Save a ticker's dataframe to Parquet format safely.
 
         Strategy:
-        1. Write to {ticker}.parquet.tmp
-        2. Rename to {ticker}.parquet (Atomic Operation)
+        1. Flatten MultiIndex columns to single-level (storage format)
+        2. Write to {ticker}.parquet.tmp
+        3. Rename to {ticker}.parquet (Atomic Operation)
+
+        Note: This method flattens MultiIndex columns before saving, as storage
+        uses Hive partitioning where ticker identity is encoded in the directory
+        structure. The input DataFrame may have MultiIndex columns (e.g., from
+        fetch_history), but stored data always has single-level columns.
 
         Returns:
             Path: The absolute path to the saved file.
@@ -29,7 +35,16 @@ class DataManager:
         if df.empty:
             raise ValueError(f"Cannot save empty dataframe for ticker '{ticker}'.")
 
-        monthly_groups = df.groupby(pd.Grouper(freq="ME"))
+        # Flatten MultiIndex columns to single-level for storage
+        # Since ticker identity is encoded in directory structure, we don't need
+        # MultiIndex in the stored data. This simplifies downstream analysis.
+        # Note: fetch_history always returns (Ticker, Field) structure, so we extract level 1.
+        df_to_save = df.copy()
+        if isinstance(df_to_save.columns, pd.MultiIndex):
+            # fetch_history guarantees (Ticker, Field) structure, so extract Field level
+            df_to_save.columns = df_to_save.columns.get_level_values(1)
+
+        monthly_groups = df_to_save.groupby(pd.Grouper(freq="ME"))
 
         for period, chunk in monthly_groups:
             if chunk.empty:
@@ -87,6 +102,10 @@ class DataManager:
 
         The pyarrow engine automatically discovers and reads all files
         within the ticker's root directory, handling partition discovery.
+
+        Returns:
+            pd.DataFrame: DataFrame with single-level columns (MultiIndex is
+            flattened during save_ticker, so loaded data always has simple columns).
         """
 
         # 1. Define the ticket root directory path

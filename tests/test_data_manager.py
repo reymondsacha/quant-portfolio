@@ -149,3 +149,55 @@ def test_load_corrupt_ticker_raises_runtime_error(tmp_path: Path):
     # which our DataManager catches and re-raises as a RuntimeError.
     with pytest.raises(RuntimeError, match="Corrupt data"):
         manager.load_ticker(ticker)
+
+
+def test_save_ticker_flattens_multiindex(tmp_path: Path):
+    """
+    Test that save_ticker flattens MultiIndex columns before saving.
+    This ensures stored data has single-level columns, matching the Hive
+    partitioning structure where ticker identity is in the directory path.
+    """
+    manager = DataManager(base_dir=str(tmp_path / "storage"))
+    ticker = "AAPL"
+    
+    # Create a DataFrame with MultiIndex columns (simulating fetch_history output)
+    dates = pd.to_datetime(["2023-01-01", "2023-01-02", "2023-01-03"])
+    df_multiindex = pd.DataFrame(
+        {
+            ("AAPL", "Open"): [100.0, 101.0, 102.0],
+            ("AAPL", "Close"): [101.5, 102.5, 103.5],
+            ("AAPL", "Volume"): [100000, 200000, 300000],
+        },
+        index=dates,
+    )
+    df_multiindex.columns = pd.MultiIndex.from_tuples(df_multiindex.columns)
+    
+    # Verify input has MultiIndex
+    assert df_multiindex.columns.nlevels == 2
+    
+    # Save and load
+    manager.save_ticker(ticker, df_multiindex)
+    df_loaded = manager.load_ticker(ticker)
+    
+    # Verify loaded data has single-level columns
+    assert df_loaded.columns.nlevels == 1
+    assert "Open" in df_loaded.columns
+    assert "Close" in df_loaded.columns
+    assert "Volume" in df_loaded.columns
+    assert ("AAPL", "Open") not in df_loaded.columns  # MultiIndex should be gone
+    
+    # Verify data integrity (compare values, not structure)
+    # Create expected DataFrame with single-level columns for comparison
+    df_expected = pd.DataFrame(
+        {
+            "Open": [100.0, 101.0, 102.0],
+            "Close": [101.5, 102.5, 103.5],
+            "Volume": [100000, 200000, 300000],
+        },
+        index=dates,
+    )
+    pd.testing.assert_frame_equal(
+        df_expected,
+        df_loaded[["Open", "Close", "Volume"]],
+        check_freq=False,
+    )

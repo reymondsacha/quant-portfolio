@@ -82,11 +82,11 @@ def run_pipeline(tickers: List[str], start_date: str, end_date: str):
 
 def main():
     # Define the list of core tickers to ingest
-    CORE_TICKERS = ["AAPL", "MSFT", "GOOGL", "NVDA", "TSLA", "^GSPC", "AMZN", "META"]
+    CORE_TICKERS = ["AAPL", "MSFT", "GOOGL", "NVDA", "TSLA"]
 
     # Define the primary configuration (Dates)
-    START_DATE = "1970-01-01"
-    END_DATE = "2024-12-31"
+    START_DATE = "2020-01-01"
+    END_DATE = "2023-12-31"
 
     run_pipeline(CORE_TICKERS, START_DATE, END_DATE)
 

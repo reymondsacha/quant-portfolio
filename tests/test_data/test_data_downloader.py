@@ -1,10 +1,10 @@
 import pandas as pd
 from unittest.mock import patch
-from src.data_downloader import YahooDownloader
+from src.data.data_downloader import YahooDownloader
 
 
 class TestYahooDownloader:
-    @patch("src.data_downloader.yf.download")
+    @patch("src.data.data_downloader.yf.download")
     def test_invalid_ticker_handling(self, mock_yf_download):
         """
         Test that the downloader returns an empty DataFrame when no data is returned.
@@ -20,7 +20,7 @@ class TestYahooDownloader:
         assert isinstance(result, pd.DataFrame)
         assert result.empty
 
-    @patch("src.data_downloader.yf.download")
+    @patch("src.data.data_downloader.yf.download")
     def test_valid_ticker_download(self, mock_yf_download):
         """
         Test that the downloader correctly returns data with MultiIndex when the network call succeeds.
@@ -49,7 +49,7 @@ class TestYahooDownloader:
         assert ("AAPL", "Close") in result.columns
         assert ("AAPL", "Volume") in result.columns
 
-    @patch("src.data_downloader.yf.download")
+    @patch("src.data.data_downloader.yf.download")
     def test_single_ticker_flat_columns(self, mock_yf_download):
         """
         Test that flat columns from yfinance are wrapped in MultiIndex structure.

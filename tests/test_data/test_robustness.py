@@ -1,9 +1,8 @@
 import pytest
 import pandas as pd
-from unittest.mock import patch, MagicMock
-from src.data_downloader import YahooDownloader, SymbolNotFoundError
+from unittest.mock import patch
+from src.data.data_downloader import YahooDownloader
 
-# We assume your Downloader is in src/data_downloader.py
 
 class TestRobustness:
     """
@@ -11,7 +10,7 @@ class TestRobustness:
     These tests do NOT hit the real Yahoo Finance API.
     """
 
-    @patch("src.data_downloader.yf.download")
+    @patch("src.data.data_downloader.yf.download")
     def test_retry_on_network_failure(self, mock_download):
         """
         Scenario: The API fails twice with network errors, then succeeds.
@@ -22,13 +21,13 @@ class TestRobustness:
         # Call 2: Raises TimeoutError
         # Call 3: Returns a valid DataFrame
         mock_download.side_effect = [
-            RuntimeError("Connection lost"), 
-            TimeoutError("Server busy"), 
-            pd.DataFrame({"Close": [100, 101]}, index=[0, 1])
+            RuntimeError("Connection lost"),
+            TimeoutError("Server busy"),
+            pd.DataFrame({"Close": [100, 101]}, index=pd.Index([0, 1])),
         ]
 
         downloader = YahooDownloader()
-        
+
         # STEP 2: Execute
         # We expect this to SUCCEED eventually, returning the dataframe
         df = downloader.fetch_history("AAPL", "2023-01-01", "2023-01-05")
@@ -40,7 +39,7 @@ class TestRobustness:
         assert mock_download.call_count == 3
         print("\n[Pass] Retry logic successfully handled 2 network failures.")
 
-    @patch("src.data_downloader.yf.download")
+    @patch("src.data.data_downloader.yf.download")
     def test_no_retry_on_invalid_symbol(self, mock_download):
         """
         Scenario: The API returns an empty DataFrame (valid connection, bad symbol).
@@ -60,7 +59,7 @@ class TestRobustness:
         assert mock_download.call_count == 1
         print("\n[Pass] Invalid symbol handled immediately without useless retries.")
 
-    @patch("src.data_downloader.yf.download")
+    @patch("src.data.data_downloader.yf.download")
     def test_max_retries_exceeded(self, mock_download):
         """
         Scenario: The API fails consistently (e.g., permanent outage).

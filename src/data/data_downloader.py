@@ -2,7 +2,6 @@
 
 import pandas as pd
 import yfinance as yf
-from pandas.errors import EmptyDataError
 from typing import List
 import logging
 import datetime  # Need to import datetime for validation
@@ -81,14 +80,18 @@ class YahooDownloader:
 
             # Defensive check: Ensure df is not None and is a DataFrame
             if df is None or not isinstance(df, pd.DataFrame):
-                raise SymbolNotFoundError(ticker, "No data returned from Yahoo Finance.")
+                raise SymbolNotFoundError(
+                    ticker, "No data returned from Yahoo Finance."
+                )
 
             if df.empty:
                 # LOG WARNING before raising EmptyDataError for internal checks
                 logger.warning(
                     f"No data returned from Yahoo Finance for {ticker}. Returning empty DataFrame."
                 )
-                raise SymbolNotFoundError(ticker,"No data returned from Yahoo Finance.") 
+                raise SymbolNotFoundError(
+                    ticker, "No data returned from Yahoo Finance."
+                )
 
             # --- DEFENSIVE MULTIINDEX FIX (Kept from your final working code) ---
             if isinstance(df.columns, pd.MultiIndex):
@@ -115,9 +118,7 @@ class YahooDownloader:
 
         except SymbolNotFoundError:
             # Return an empty DataFrame on failure so the orchestrator can continue
-            logger.warning(
-                f"Returning empty DataFrame for invalid symbol : {ticker}."
-            )
+            logger.warning(f"Returning empty DataFrame for invalid symbol : {ticker}.")
             return pd.DataFrame()
 
         except Exception as e:
@@ -128,7 +129,3 @@ class YahooDownloader:
             raise RuntimeError(
                 f"Failed to fetch data from Yahoo Finance for {ticker}: {e}"
             ) from e
-
-
-# --- The __init__ and save_to_parquet methods and the __main__ block are REMOVED ---
-# --- The original class attributes (self.tickers, self.data) are REMOVED ---

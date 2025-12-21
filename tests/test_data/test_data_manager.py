@@ -1,8 +1,8 @@
-# tests/test_data_manager.py
+# tests/test_data/test_data_manager.py
 import pandas as pd
 import pytest
 from pathlib import Path
-from src.data_manager import DataManager
+from src.data.data_manager import DataManager
 
 
 # This fixture creates a simple DataFrame for testing
@@ -126,7 +126,7 @@ def test_atomic_write_cleanup_on_failure(tmp_path: Path, mocker):
     assert not final_path.exists(), "Final file should not exist after failure."
 
 
-# tests/test_data_manager.py (Add this function to the end)
+# tests/test_data/test_data_manager.py (Add this function to the end)
 
 
 def test_load_corrupt_ticker_raises_runtime_error(tmp_path: Path):
@@ -159,7 +159,7 @@ def test_save_ticker_flattens_multiindex(tmp_path: Path):
     """
     manager = DataManager(base_dir=str(tmp_path / "storage"))
     ticker = "AAPL"
-    
+
     # Create a DataFrame with MultiIndex columns (simulating fetch_history output)
     dates = pd.to_datetime(["2023-01-01", "2023-01-02", "2023-01-03"])
     df_multiindex = pd.DataFrame(
@@ -171,21 +171,21 @@ def test_save_ticker_flattens_multiindex(tmp_path: Path):
         index=dates,
     )
     df_multiindex.columns = pd.MultiIndex.from_tuples(df_multiindex.columns)
-    
+
     # Verify input has MultiIndex
     assert df_multiindex.columns.nlevels == 2
-    
+
     # Save and load
     manager.save_ticker(ticker, df_multiindex)
     df_loaded = manager.load_ticker(ticker)
-    
+
     # Verify loaded data has single-level columns
     assert df_loaded.columns.nlevels == 1
     assert "Open" in df_loaded.columns
     assert "Close" in df_loaded.columns
     assert "Volume" in df_loaded.columns
     assert ("AAPL", "Open") not in df_loaded.columns  # MultiIndex should be gone
-    
+
     # Verify data integrity (compare values, not structure)
     # Create expected DataFrame with single-level columns for comparison
     df_expected = pd.DataFrame(

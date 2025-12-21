@@ -2,11 +2,9 @@
 
 import logging
 from pathlib import Path
-from src.data_downloader import (
-    YahooDownloader,
-)
-from src.data_manager import DataManager
 from typing import List
+from src.data.data_downloader import YahooDownloader
+from src.data.data_manager import DataManager
 
 # Ensure logs directory exists
 Path("logs").mkdir(exist_ok=True)
@@ -15,6 +13,7 @@ Path("logs").mkdir(exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
+    force=True,
     handlers=[
         logging.FileHandler("logs/pipeline.log", mode="w"),
         logging.StreamHandler(),  # Console output

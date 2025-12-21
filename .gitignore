@@ -17,3 +17,5 @@ data/processed/
 
 # Ignore file types everywhere
 *.parquet
+
+roadmap.md

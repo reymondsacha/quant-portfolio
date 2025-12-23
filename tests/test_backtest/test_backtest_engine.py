@@ -7,10 +7,11 @@ from src.backtest.engine import Backtest
 @dataclass
 class MockEvent(Event):
     timestamp: str = "2023-01-01"
-    symbol : str = "TEST"
-    
+    symbol: str = "TEST"
+
     def __post_init__(self):
         self.type = EventType.MARKET
+
 
 class MockDataHandler:
     def __init__(self):
@@ -22,16 +23,26 @@ class MockDataHandler:
         if self._call_count > 3:
             self.continue_backtest = False
 
+
+class MockStrategy:
+    def __init__(self):
+        self._call_count = 0
+
+    def calculate_signals(self, event):
+        self._call_count += 1
+
+
 def test_loop_processing():
     """
-    Verifies that the Backtest engine processes events 
+    Verifies that the Backtest engine processes events
     in the queue correctly until the queue is empty.
     """
     # 1. Setup (Injecting the Queue)
     test_queue = queue.Queue()
     mock_handler = MockDataHandler()
+    mock_strategy = MockStrategy()
 
-    backtest = Backtest(test_queue, mock_handler)
+    backtest = Backtest(test_queue, mock_handler, mock_strategy)
 
     # 2. Inject Events
     test_queue.put(MockEvent())
@@ -40,6 +51,5 @@ def test_loop_processing():
     backtest.run()
 
     # 4. Assert
-    assert test_queue.empty() == True
-    assert mock_handler._call_count > 0 # Verifies engine called for data
-    
+    assert test_queue.empty()
+    assert mock_handler._call_count > 0  # Verifies engine called for data

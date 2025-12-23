@@ -1,11 +1,13 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 
+
 class EventType:
-    MARKET = 'MARKET'
-    SIGNAL = 'SIGNAL'
-    ORDER = 'ORDER'
-    FILL = 'FILL'
+    MARKET = "MARKET"
+    SIGNAL = "SIGNAL"
+    ORDER = "ORDER"
+    FILL = "FILL"
+
 
 @dataclass
 class Event:
@@ -13,7 +15,9 @@ class Event:
     Base Event class.
     init=False means 'type' is NOT required in the constructor (e.g. MarketEvent(timestamp=...)).
     """
-    type: str = field(init=False, default=None)
+
+    type: str | None = field(init=False, default=None)
+
 
 @dataclass
 class MarketEvent(Event):
@@ -24,9 +28,10 @@ class MarketEvent(Event):
     low_price: float
     close_price: float
     volume: float
-    
+
     def __post_init__(self):
         self.type = EventType.MARKET
+
 
 @dataclass
 class SignalEvent(Event):
@@ -34,6 +39,6 @@ class SignalEvent(Event):
     symbol: str
     side: str
     strength: float = 1.0
-    
+
     def __post_init__(self):
         self.type = EventType.SIGNAL

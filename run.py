@@ -32,7 +32,7 @@ def run_pipeline():
 
     # 4. The engine (backtest)
     bt = Backtest(
-        events_queue=events_queue, data_handler=data_handler, strategy=strategy
+        events_queue=events_queue, data_handler=data_handler, strategy=strategy, start_date="2020-01-01", initial_capital=1000000.0
     )
 
     # 5. Ignite

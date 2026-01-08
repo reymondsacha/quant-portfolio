@@ -42,3 +42,17 @@ class SignalEvent(Event):
 
     def __post_init__(self):
         self.type = EventType.SIGNAL
+
+
+@dataclass
+class OrderEvent(Event):
+    symbol: str
+    order_type: str
+    quantity: int
+    direction: str
+
+    def __post_init__(self):
+        self.type = EventType.ORDER
+
+    def print_order(self):
+        return str(self)

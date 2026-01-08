@@ -42,6 +42,7 @@ class HistoricDataHandler(DataHandler):
     def __init__(self, events_queue: queue.Queue, file_path: str | Path, symbol: str):
         self.events_queue = events_queue
         self.symbol = symbol
+        self.symbol_list = [symbol]
         self.continue_backtest = True
 
         # 1. Load Data

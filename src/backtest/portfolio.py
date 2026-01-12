@@ -1,6 +1,9 @@
+import logging
+import pandas as pd
 from abc import ABC, abstractmethod
-from src.backtest.events import SignalEvent, OrderEvent
+from src.backtest.events import SignalEvent, OrderEvent, FillEvent
 
+logger = logging.getLogger(__name__)
 
 class Portfolio(ABC):
     """
@@ -15,6 +18,14 @@ class Portfolio(ABC):
         """
         raise NotImplementedError("Should implement update_signal()")
 
+    @abstractmethod
+    def update_fill(self, event):
+        """
+        Update the portfolio current positions and holdings
+        from a FillEvent.
+        """
+        raise NotImplementedError("Should implement update_fill()")
+
 
 class NaivePortfolio(Portfolio):
     """
@@ -23,9 +34,9 @@ class NaivePortfolio(Portfolio):
     management or position sizing.
     """
 
-    def __init__(self, bars, events, start_date, initial_capital=100000.0):
+    def __init__(self, bars, events_queue, start_date, initial_capital=100000.0):
         self.bars = bars  # DataHandler object
-        self.events = events  # The Event Queue
+        self.events_queue = events_queue  # The Event Queue
         self.symbol_list = self.bars.symbol_list
         self.start_date = start_date
         self.initial_capital = initial_capital
@@ -51,6 +62,38 @@ class NaivePortfolio(Portfolio):
         holdings["cash"] = self.initial_capital
         holdings["commission"] = 0.0
         holdings["total"] = self.initial_capital
+        return holdings
+
+    def update_timeindex(self, event):
+        """
+        Updates the current holdings (Mark-to-Market) using the latest
+        available prices and appends in history.
+        """
+        #1. Update Market Value of all Positions
+        for s in self.symbol_list:
+            try:
+                bars = self.bars.get_latest_bars(s, N=1)
+                if bars:
+                    current_price =  bars[0]['close_price']
+
+                    market_value = current_price * self.current_positions[s]
+                    self.current_holdings[s] = market_value
+                
+                else:
+                    pass
+            except KeyError:
+                pass
+        
+        #2. Update Total Equity
+        total_equity = self.current_holdings['cash']
+        for s in self.symbol_list:
+            total_equity += self.current_holdings[s]
+        self.current_holdings['total'] = total_equity
+
+        #3. Record History (Snapshot)
+        self.all_positions.append(self.current_positions.copy())
+        self.all_holdings.append(self.current_holdings.copy())
+
 
     def update_signal(self, event: SignalEvent):
         """
@@ -58,8 +101,8 @@ class NaivePortfolio(Portfolio):
         """
         if event.type == "SIGNAL":
             order_event = self._generate_naive_order(event)
-            return order_event
-        return None
+            if order_event is not None:
+                self.events_queue.put(order_event)
 
     def _generate_naive_order(self, signal: SignalEvent):
         """
@@ -69,7 +112,6 @@ class NaivePortfolio(Portfolio):
         order = None
         symbol = signal.symbol
         direction = signal.side
-
         quantity = 100
         order_type = "MKT"
 
@@ -87,3 +129,65 @@ class NaivePortfolio(Portfolio):
                 order = OrderEvent(symbol, order_type, quantity, "Buy")
 
         return order
+
+    def update_fill(self, event: FillEvent):
+        """
+        Updates the portfolio current positions and holdings
+        with a FillEvent.
+        """
+
+        if not isinstance(event, FillEvent):
+            print(f"CRITICAL: update_fill received {type(event)} instead of FillEvent. Skipping.")
+            return
+
+        #1. Get the latest price to calculate cost
+        latest_bars_list = self.bars.get_latest_bars(event.symbol, N=1)
+
+        if not latest_bars_list:
+            logger.error(f"CRITICAL: No Market Data Found for {event.symbol} to process Fill")
+            return
+
+        current_bar = latest_bars_list[0]
+        fill_price = current_bar['close_price']
+
+        #2. Calculate cost
+        fill_qty = event.quantity
+        direction = event.direction
+        cost = fill_qty * fill_price
+        commission = event.commission if event.commission else 0.0
+
+        #3. Update Positions (the Quantity)
+        if event.symbol not in self.current_positions:
+            self.current_positions[event.symbol] = 0
+
+        if direction == "BUY":
+            self.current_positions[event.symbol] += fill_qty
+        elif direction == "SELL":
+            self.current_positions[event.symbol] -= fill_qty
+
+        #4. Update Holdings
+        if direction == "BUY":
+            self.current_holdings[event.symbol] += cost
+            self.current_holdings['cash'] -= (cost + commission)
+        
+        if direction == "SELL":
+            self.current_holdings[event.symbol] -= cost
+            self.current_holdings['cash'] += (cost - commission)
+
+    def create_equity_curve_dataframe(self):
+        """
+        Creates a pandas DataFrame from the all_holdings list
+        of dictionaries.
+        """
+        curve = pd.DataFrame(self.all_holdings)
+        self.equity_curve = curve
+        return curve
+
+        
+               
+
+
+
+        
+
+

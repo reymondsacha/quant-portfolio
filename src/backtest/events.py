@@ -56,3 +56,24 @@ class OrderEvent(Event):
 
     def print_order(self):
         return str(self)
+
+@dataclass
+class FillEvent(Event):
+    """
+    Encapsulates the notion of a filled order, as returned
+    from a brokerage. Stores the quantity of an instrument
+    actually filled and at what price. In addition, stores
+    the commission of the trade from the brokerage.
+    """
+    timestamp: datetime
+    symbol: str
+    exchange: str
+    quantity: int
+    direction: str
+    fill_cost: float | None
+    commission: float | None
+
+    def __post_init__(self):
+        self.type = EventType.FILL
+
+

@@ -91,3 +91,19 @@ class SmaCrossStrategy(Strategy):
                     strength=1.0,  # Fixed strength for now
                 )
                 self.events_queue.put(signal)
+
+            # CASE B: Death Cross (SELL / EXIT)
+            elif short_sma_t < long_sma_t and short_sma_prev >= long_sma_prev:
+                print(
+                    f"[{bars[-1]['timestamp']}] SIGNAL: EXIT {symbol} "
+                    f"(Short: {short_sma_t:.2f} < Long: {long_sma_t:.2f})"
+                )
+
+                # Emit Signal
+                signal = SignalEvent(
+                    timestamp=bars[-1]["timestamp"],
+                    symbol=symbol,
+                    side="EXIT", # NaivePortfolio detects this and closes the position
+                    strength=1.0,
+                )
+                self.events_queue.put(signal)

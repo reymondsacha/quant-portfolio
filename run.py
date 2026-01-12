@@ -1,23 +1,33 @@
 from queue import Queue
 from pathlib import Path
+import logging
 
 from src.backtest.engine import Backtest
 from src.backtest.data_handler import HistoricDataHandler
 from src.backtest.strategy import SmaCrossStrategy
 
 
+#Setup Logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+
+
 def run_pipeline():
     DATA_SET_ROOT = "data/raw/AAPL"
     SYMBOL = "AAPL"
     dataset_path = Path(DATA_SET_ROOT)
+
     if not dataset_path.exists():
-        print(f"Error : Dataset root {dataset_path} not found")
-        print("Expected structure: data/raw/AAPL/year=2020/month=05/data.parquet")
+        logging.error(f"Error : Dataset root {dataset_path} not found")
+        logging.error("Expected structure: data/raw/AAPL/year=2020/month=05/data.parquet")
     # 1. Infrastucture
     events_queue = Queue()
 
     # 2. The memory (datahandler)
-    print(f"Loading data from {dataset_path}...")
+    logging.info(f"Loading data from {dataset_path}...")
     data_handler = HistoricDataHandler(
         events_queue=events_queue, file_path=dataset_path, symbol=SYMBOL
     )
@@ -37,6 +47,8 @@ def run_pipeline():
 
     # 5. Ignite
     bt.run()
+
+    bt.output_performance()
 
 
 if __name__ == "__main__":

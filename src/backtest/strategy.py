@@ -1,9 +1,12 @@
 from abc import ABC, abstractmethod
 from queue import Queue
 import numpy as np
+import logging
 
 from src.backtest.events import SignalEvent
 from src.backtest.data_handler import DataHandler
+
+logger = logging.getLogger("Strategy")
 
 
 class Strategy(ABC):
@@ -78,8 +81,8 @@ class SmaCrossStrategy(Strategy):
             # 4. The Decision (Crossover Logic)
             # Check for "Golden Cross": Short crosses ABOVE Long
             if short_sma_t > long_sma_t and short_sma_prev <= long_sma_prev:
-                print(
-                    f"[{bars[-1]['timestamp']}] SIGNAL: BUY {symbol} "
+                logger.info(
+                    f" SIGNAL: BUY {symbol} "
                     f"(Short: {short_sma_t:.2f} > Long: {long_sma_t:.2f})"
                 )
 
@@ -94,8 +97,8 @@ class SmaCrossStrategy(Strategy):
 
             # CASE B: Death Cross (SELL / EXIT)
             elif short_sma_t < long_sma_t and short_sma_prev >= long_sma_prev:
-                print(
-                    f"[{bars[-1]['timestamp']}] SIGNAL: EXIT {symbol} "
+                logger.info(
+                    f" SIGNAL: EXIT {symbol} "
                     f"(Short: {short_sma_t:.2f} < Long: {long_sma_t:.2f})"
                 )
 
@@ -103,7 +106,7 @@ class SmaCrossStrategy(Strategy):
                 signal = SignalEvent(
                     timestamp=bars[-1]["timestamp"],
                     symbol=symbol,
-                    side="EXIT", # NaivePortfolio detects this and closes the position
+                    side="EXIT",  # NaivePortfolio detects this and closes the position
                     strength=1.0,
                 )
                 self.events_queue.put(signal)

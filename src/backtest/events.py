@@ -57,6 +57,7 @@ class OrderEvent(Event):
     def print_order(self):
         return str(self)
 
+
 @dataclass
 class FillEvent(Event):
     """
@@ -65,6 +66,7 @@ class FillEvent(Event):
     actually filled and at what price. In addition, stores
     the commission of the trade from the brokerage.
     """
+
     timestamp: datetime
     symbol: str
     exchange: str
@@ -75,5 +77,3 @@ class FillEvent(Event):
 
     def __post_init__(self):
         self.type = EventType.FILL
-
-

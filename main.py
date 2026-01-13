@@ -12,12 +12,12 @@ Path("logs").mkdir(exist_ok=True)
 # Configure Logging with both console and file handlers
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     force=True,
     handlers=[
         logging.FileHandler("logs/pipeline.log", mode="w"),
-        logging.StreamHandler(),  # Console output
-    ],
+        logging.StreamHandler()  # Console output
+    ]
 )
 
 

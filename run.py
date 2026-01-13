@@ -11,7 +11,12 @@ from src.backtest.strategy import SmaCrossStrategy
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+    datefmt='%Y-%m-%d %H:%M:%S',
+    force=True,
+    handlers=[
+        logging.FileHandler("logs/backtest.log", mode="w"),
+        logging.StreamHandler()  # Console output
+    ]
 )
 
 
@@ -22,7 +27,7 @@ def run_pipeline():
 
     if not dataset_path.exists():
         logging.error(f"Error : Dataset root {dataset_path} not found")
-        logging.error("Expected structure: data/raw/AAPL/year=2020/month=05/data.parquet")
+        logging.error("Expected structure: data/raw/APPL/year=2020/month=05/data.parquet")
     # 1. Infrastucture
     events_queue = Queue()
 
@@ -48,6 +53,7 @@ def run_pipeline():
     # 5. Ignite
     bt.run()
 
+    #6. Report
     bt.output_performance()
 
 

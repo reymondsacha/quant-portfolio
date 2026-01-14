@@ -16,8 +16,8 @@ logging.basicConfig(
     force=True,
     handlers=[
         logging.FileHandler("logs/pipeline.log", mode="w"),
-        logging.StreamHandler()  # Console output
-    ]
+        logging.StreamHandler(),  # Console output
+    ],
 )
 
 

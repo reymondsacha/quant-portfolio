@@ -7,16 +7,16 @@ from src.backtest.data_handler import HistoricDataHandler
 from src.backtest.strategy import SmaCrossStrategy
 
 
-#Setup Logging
+# Setup Logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S',
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
     force=True,
     handlers=[
         logging.FileHandler("logs/backtest.log", mode="w"),
-        logging.StreamHandler()  # Console output
-    ]
+        logging.StreamHandler(),  # Console output
+    ],
 )
 
 
@@ -27,8 +27,11 @@ def run_pipeline():
 
     if not dataset_path.exists():
         logging.error(f"Error : Dataset root {dataset_path} not found")
-        logging.error("Expected structure: data/raw/APPL/year=2020/month=05/data.parquet")
-    # 1. Infrastucture
+        logging.error(
+            "Expected structure: data/raw/AAPL/year=2020/month=05/data.parquet"
+        )
+        return
+    # 1. Infrastructure
     events_queue = Queue()
 
     # 2. The memory (datahandler)
@@ -47,14 +50,21 @@ def run_pipeline():
 
     # 4. The engine (backtest)
     bt = Backtest(
-        events_queue=events_queue, data_handler=data_handler, strategy=strategy, start_date="2020-01-01", initial_capital=1000000.0
+        events_queue=events_queue,
+        data_handler=data_handler,
+        strategy=strategy,
+        start_date="2020-01-01",
+        initial_capital=1000000.0,
     )
 
     # 5. Ignite
     bt.run()
 
-    #6. Report
+    # 6. Report
     bt.output_performance()
+
+    # 7. Export Results
+    bt.export_results("backtest_results.csv")
 
 
 if __name__ == "__main__":

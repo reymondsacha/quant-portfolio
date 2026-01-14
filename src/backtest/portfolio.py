@@ -3,7 +3,6 @@ import math
 import pandas as pd
 import numpy as np
 from abc import ABC, abstractmethod
-from typing import Any
 from src.backtest.events import SignalEvent, OrderEvent, FillEvent
 
 logger = logging.getLogger("Portfolio")
@@ -38,7 +37,14 @@ class NaivePortfolio(Portfolio):
     percentage of equity.
     """
 
-    def __init__(self, bars, events_queue, start_date, initial_capital=100000.0, pct_per_trade=0.10):
+    def __init__(
+        self,
+        bars,
+        events_queue,
+        start_date,
+        initial_capital=100000.0,
+        pct_per_trade=0.10,
+    ):
         self.bars = bars  # DataHandler object
         self.events_queue = events_queue  # The Event Queue
         self.symbol_list = self.bars.symbol_list
@@ -90,21 +96,20 @@ class NaivePortfolio(Portfolio):
             total_equity += self.current_holdings[s]
         self.current_holdings["total"] = total_equity
 
-        #3. Capture Timestamp
+        # 3. Capture Timestamp
         current_time = None
         try:
             bars = self.bars.get_latest_bars(self.symbol_list[0], N=1)
             if bars:
-                current_time = bars[0]['timestamp']
+                current_time = bars[0]["timestamp"]
         except Exception:
             pass
 
-        #4. Record History (Snapshot)
+        # 4. Record History (Snapshot)
         snapshot = self.current_holdings.copy()
-        snapshot['timestamp'] = current_time
+        snapshot["timestamp"] = current_time  # type: ignore[assignment]
         self.all_positions.append(self.current_positions.copy())
         self.all_holdings.append(snapshot)
-
 
     def update_signal(self, event: SignalEvent):
         """
@@ -117,7 +122,7 @@ class NaivePortfolio(Portfolio):
 
     def _generate_dynamic_order(self, signal: SignalEvent):
         """
-        Calculates the quantity to trade based on a 
+        Calculates the quantity to trade based on a
         percentage of current total equity.
         """
         order = None
@@ -125,36 +130,37 @@ class NaivePortfolio(Portfolio):
         direction = signal.side
         order_type = "MKT"
 
-        #1. Get current total equity
-        current_equity = self.current_holdings['total']
+        # 1. Get current total equity
+        current_equity = self.current_holdings["total"]
 
-        #2. Get latest price to estimate quantity
-        bars =  self.bars.get_latest_bars(symbol, N=1)
+        # 2. Get latest price to estimate quantity
+        bars = self.bars.get_latest_bars(symbol, N=1)
         if not bars:
-            return None #Cannot trade without price
+            return None  # Cannot trade without price
 
-        current_price = bars[0]['close_price']
+        current_price = bars[0]["close_price"]
 
-        #3. Calculate Quantity based on pct Equity
+        # 3. Calculate Quantity based on pct Equity
         target_allocation = current_equity * self.pct_per_trade
 
-        #Cash Guard
-        current_cash = self.current_holdings['cash']
-        if direction == 'LONG' and target_allocation > current_cash:
+        # Cash Guard
+        current_cash = self.current_holdings["cash"]
+        if direction == "LONG" and target_allocation > current_cash:
             target_allocation = current_cash
 
-        #4. Calculate Quantity to Trade
+        # 4. Calculate Quantity to Trade
         if current_price > 0:
             quantity = int(math.floor(target_allocation / current_price))
         else:
             quantity = 0
-        
-        #Safety 
-        if quantity == 0 and direction!="EXIT":
-            logger.warning(f"Signal ignored for {symbol}: Insufficient capital for 1 share")
 
+        # Safety
+        if quantity == 0 and direction != "EXIT":
+            logger.warning(
+                f"Signal ignored for {symbol}: Insufficient capital for 1 share"
+            )
 
-        #5. Generate Order
+        # 5. Generate Order
         if direction == "LONG":
             order = OrderEvent(symbol, order_type, quantity, "BUY")
         elif direction == "SHORT":
@@ -166,7 +172,7 @@ class NaivePortfolio(Portfolio):
             if cur_qty > 0:
                 order = OrderEvent(symbol, order_type, cur_qty, "SELL")
             elif cur_qty < 0:
-                order = OrderEvent(symbol, order_type, quantity, "Buy")
+                order = OrderEvent(symbol, order_type, abs(cur_qty), "BUY")
 
         return order
 
@@ -209,14 +215,14 @@ class NaivePortfolio(Portfolio):
         elif direction == "SELL":
             self.current_positions[event.symbol] -= fill_qty
 
-        # 4. Update Holdings
+        # 4. Update Cash (holdings[symbol] is updated in update_timeindex based on market prices)
         if direction == "BUY":
-            self.current_holdings[event.symbol] += cost
             self.current_holdings["cash"] -= cost + commission
-
-        if direction == "SELL":
-            self.current_holdings[event.symbol] -= cost
+        elif direction == "SELL":
             self.current_holdings["cash"] += cost - commission
+
+        # 5. Update Cumulative Commission
+        self.current_holdings["commission"] += commission
 
     def create_equity_curve_dataframe(self):
         """
@@ -224,47 +230,49 @@ class NaivePortfolio(Portfolio):
         """
         curve = pd.DataFrame(self.all_holdings)
 
-        #Set datetime index if available
-        if 'timestamp' in curve.columns and not curve['timestamp'].isnull().all():
-            curve.set_index('timestamp', inplace=True)
+        # Set datetime index if available
+        if "timestamp" in curve.columns and not bool(curve["timestamp"].isnull().all()):
+            curve.set_index("timestamp", inplace=True)
             curve.index = pd.to_datetime(curve.index)
 
         # Calculate Returns
-        curve['returns'] = curve['total'].pct_change()
-        curve['equity_curve'] = (1.0 + curve['returns']).cumprod()
+        curve["returns"] = (
+            curve["total"].pct_change().fillna(0.0)
+        )  # First period has no return (0%)
+        curve["equity_curve"] = (1.0 + curve["returns"]).cumprod()
 
-        #Calculate Drawdown
-        #1. Calculate Running Maximum (High Water Mark)
-        #2. Drawdown = (Current Value - High Water Mark) / High Water Mark
-        running_max = curve['total'].cummax()
-        curve['drawdown'] = (curve['total'] - running_max) / running_max
+        # Calculate Drawdown
+        # 1. Calculate Running Maximum (High Water Mark)
+        # 2. Drawdown = (Current Value - High Water Mark) / High Water Mark
+        running_max = curve["total"].cummax()
+        curve["drawdown"] = (curve["total"] - running_max) / running_max
 
         self.equity_curve = curve
         return curve
-
 
     def output_summary_stats(self):
         """
         Returns a dictionary of performance statistics
         """
-        if not hasattr(self, 'equity_curve'):
+        if not hasattr(self, "equity_curve"):
             self.create_equity_curve_dataframe()
 
-        total_return = (self.equity_curve['total'].iloc[-1] - self.initial_capital) / self.initial_capital
+        total_return = (
+            self.equity_curve["total"].iloc[-1] - self.initial_capital
+        ) / self.initial_capital
 
         # Calculate Sharpe Ratio (Annualized)
         # Assuming daily data (252 days). If minute data, use 252*60*6.5
-        returns = self.equity_curve['returns']
+        returns = self.equity_curve["returns"]
         if returns.std() != 0:
             sharpe_ratio = np.sqrt(252) * (returns.mean() / returns.std())
         else:
             sharpe_ratio = 0.0
 
-        max_drawdown = self.equity_curve['drawdown'].min()
+        max_drawdown = self.equity_curve["drawdown"].min()
 
-        return{
-            'Total Return': total_return,
-            'Sharpe Ratio': sharpe_ratio,
-            'Max Drawdown': max_drawdown
+        return {
+            "Total Return": total_return,
+            "Sharpe Ratio": sharpe_ratio,
+            "Max Drawdown": max_drawdown,
         }
-

@@ -7,6 +7,7 @@ from src.backtest.events import OrderEvent, FillEvent
 
 logger = logging.getLogger("Execution")
 
+
 class ExecutionHandler(ABC):
     """
     The ExecutionHandler simulates the intercation

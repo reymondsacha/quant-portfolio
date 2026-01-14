@@ -1,4 +1,5 @@
 import queue
+from datetime import datetime
 from dataclasses import dataclass
 from src.backtest.events import Event, EventType
 from src.backtest.engine import Backtest
@@ -18,11 +19,30 @@ class MockDataHandler:
         self.continue_backtest = True
         self._call_count = 0
         self.symbol_list = ["TEST"]
+        self.prices = {}
 
     def update_bars(self):
         self._call_count += 1
         if self._call_count > 3:
             self.continue_backtest = False
+
+    def get_latest_bars(self, symbol, N=1):
+        """
+        Returns a list of dictionaries.
+        """
+
+        price = self.prices.get(symbol, 100.0)
+        dummy_bar = {
+            "timestamp": datetime.now(),
+            "symbol": symbol,
+            "open_price": price,
+            "high_price": price,
+            "low_price": price,
+            "close_price": price,
+            "volume": 1000,
+        }
+
+        return [dummy_bar] * N
 
 
 class MockStrategy:

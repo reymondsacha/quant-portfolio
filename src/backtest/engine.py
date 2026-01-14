@@ -1,6 +1,5 @@
 import queue
 import logging
-import matplotlib.pyplot as plt
 
 from src.backtest.events import EventType
 from src.backtest.portfolio import NaivePortfolio
@@ -10,7 +9,15 @@ logger = logging.getLogger("Engine")
 
 
 class Backtest:
-    def __init__(self,events_queue: queue.Queue, data_handler, strategy, start_date, initial_capital=1000000.0, pct_per_trade=0.10):
+    def __init__(
+        self,
+        events_queue: queue.Queue,
+        data_handler,
+        strategy,
+        start_date,
+        initial_capital=1000000.0,
+        pct_per_trade=0.10,
+    ):
         """
         Initializes the event queue and the loop components.
         """
@@ -82,52 +89,29 @@ class Backtest:
         """
         # Ensure the portfolio builds the curve dataframe
         if hasattr(self.portfolio, "create_equity_curve_dataframe"):
-            curve = self.portfolio.create_equity_curve_dataframe()
+            self.portfolio.create_equity_curve_dataframe()
         else:
             logger.error("Portfolio missing 'create_equity_curve_dataframe' method.")
             return
 
         stats = self.portfolio.output_summary_stats()
 
-        logger.info("---------------------------------")
+        logger.info("-" * 40)
         logger.info(
             f"Final Portfolio Value: ${self.portfolio.current_holdings['total']:,.2f}"
         )
         logger.info(f"Total Return:      {stats['Total Return']:.2%}")
         logger.info(f"Max Drawdown:      {stats['Max Drawdown']:.2%}")
         logger.info(f"Sharpe Ratio:      {stats['Sharpe Ratio']:,.2f}")
-        logger.info("---------------------------------")
+        logger.info("-" * 40)
 
-        # Plotting
-        logger.info("Generating Equity Curve Chart...")
+    def export_results(self, filename="backtest_results.csv"):
+        """
+        Exports the portfolio equity curve to a CSV file.
+        """
+        # Ensure the equity curve dataframe is generated
+        df = self.portfolio.create_equity_curve_dataframe()
 
-        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
-
-        # Plot 1: Total Equity
-        ax1.plot(curve["total"], label="Total Equity", color="green", linewidth=1.5)
-        ax1.set_ylabel("Equity ($)")
-        ax1.set_title("Strategy Performance")
-        ax1.grid(True)
-        ax1.legend()
-
-        # Plot 2: Drawdown
-        ax2.plot(curve['drawdown'], label="Drawdown", color="red", linewidth=1)
-        ax2.fill_between(curve.index, curve['drawdown'], 0, color='red', alpha=0.3)
-        ax2.set_ylabel("Drawdown (%)")
-        ax2.grid(True)
-        ax2.legend()
-
-        # Plot 3: Cash
-        ax3.plot(curve["cash"], label="Cash Balance", color="blue", linestyle="--")
-        ax3.set_ylabel("Cash ($)")
-        ax3.set_xlabel("Time (Bars)")
-        ax3.legend()
-        ax3.grid(True)
-
-        plt.tight_layout()
-
-        # Save to file instead of showing (works better in VS Code/Cursor)
-        filename = "equity_curve.png"
-        plt.savefig(filename)
-        logger.info(f"Chart saved to {filename}")
-        plt.close()
+        # Save to CSV
+        df.to_csv(filename)
+        logger.info(f"[-] Results exported to {filename}")

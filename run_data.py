@@ -15,7 +15,7 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     force=True,
     handlers=[
-        logging.FileHandler("logs/pipeline.log", mode="w"),
+        logging.FileHandler("logs/data.log", mode="w"),
         logging.StreamHandler(),  # Console output
     ],
 )
@@ -81,7 +81,17 @@ def run_pipeline(tickers: List[str], start_date: str, end_date: str):
 
 def main():
     # Define the list of core tickers to ingest
-    CORE_TICKERS = ["AAPL", "MSFT", "GOOGL", "NVDA", "TSLA"]
+    CORE_TICKERS = [
+        "MC.PA",
+        "TTE.PA",
+        "AIR.PA",
+        "SAN.PA",
+        "OR.PA",
+        "BNP.PA",
+        "SU.PA",
+        "DG.PA",
+        "RMS.PA",
+    ]
 
     # Define the primary configuration (Dates)
     START_DATE = "2020-01-01"

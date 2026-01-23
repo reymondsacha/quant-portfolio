@@ -126,9 +126,6 @@ def test_atomic_write_cleanup_on_failure(tmp_path: Path, mocker):
     assert not final_path.exists(), "Final file should not exist after failure."
 
 
-# tests/test_data/test_data_manager.py (Add this function to the end)
-
-
 def test_load_corrupt_ticker_raises_runtime_error(tmp_path: Path):
     """
     Test the error path for corrupted data (lines 68-69 of data_manager.py).

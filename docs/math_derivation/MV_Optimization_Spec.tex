@@ -1,0 +1,202 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{bm}
+\usepackage[margin=2.5cm]{geometry} % Sets 2.5cm margins on all sides
+
+\title{Mathematical Specification: Mean-Variance Optimization with Ledoit-Wolf Shrinkage}
+\author{Sacha Reymond}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{The Primal Optimization Problem}
+We consider a universe of $N$ assets. Let $\mathbf{w} \in \mathbb{R}^N$ be the weight vector, $\bm{\mu} \in \mathbb{R}^N$ the expected returns, and $\Sigma \in \mathbb{S}_{++}^N$ the covariance matrix. The long-only Markowitz problem is defined as:
+
+\begin{equation}
+\begin{aligned}
+& \min_{\mathbf{w}} \quad \frac{1}{2} \mathbf{w}^T \Sigma \mathbf{w} \\
+& \text{s.t.} \quad \mathbf{w}^T \mathbf{1} = 1 \\
+& \quad \quad \mathbf{w}^T \bm{\mu} = r_{target} \\
+& \quad \quad w_i \geq 0, \quad \forall i \in \{1, \dots, N\}
+\end{aligned}
+\end{equation}
+
+\section{The Lagrangian and KKT Conditions}
+We first derive the solution for the unconstrained case (without non-negativity constraints). The Lagrangian is:
+\begin{equation}
+\mathcal{L}_0(\mathbf{w}, \lambda, \gamma) = \frac{1}{2} \mathbf{w}^T \Sigma \mathbf{w} - \lambda(\mathbf{w}^T \mathbf{1} - 1) - \gamma(\mathbf{w}^T \bm{\mu} - r_{target})
+\end{equation}
+
+Taking the gradient with respect to $\mathbf{w}$ and setting it to zero (stationarity condition), we obtain:
+\begin{equation}
+\nabla_{\mathbf{w}} \mathcal{L}_0 = \Sigma \mathbf{w} - \lambda \mathbf{1} - \gamma \bm{\mu} = 0
+\end{equation}
+which implies:
+\begin{equation}
+\mathbf{w} = \Sigma^{-1}(\lambda \mathbf{1} + \gamma \bm{\mu}) \label{eq:weight_unconstrained}
+\end{equation}
+
+Substituting into the primal feasibility constraints $\mathbf{w}^T \mathbf{1} = 1$ and $\mathbf{w}^T \bm{\mu} = r_{target}$, we obtain:
+\begin{align}
+\mathbf{1}^T \Sigma^{-1} (\lambda \mathbf{1} + \gamma \bm{\mu}) &= 1 \label{eq:constraint1} \\
+\bm{\mu}^T \Sigma^{-1} (\lambda \mathbf{1} + \gamma \bm{\mu}) &= r_{target} \label{eq:constraint2}
+\end{align}
+
+Defining the following scalar quantities:
+\begin{align}
+A &= \mathbf{1}^T \Sigma^{-1} \mathbf{1} \\
+B &= \mathbf{1}^T \Sigma^{-1} \bm{\mu} = \bm{\mu}^T \Sigma^{-1} \mathbf{1} \\
+C &= \bm{\mu}^T \Sigma^{-1} \bm{\mu}
+\end{align}
+
+Equations~\eqref{eq:constraint1} and~\eqref{eq:constraint2} can be rewritten as the linear system:
+\begin{equation}
+\begin{bmatrix}
+A & B \\
+B & C
+\end{bmatrix}
+\begin{bmatrix}
+\lambda \\
+\gamma
+\end{bmatrix}
+=
+\begin{bmatrix}
+1 \\
+r_{target}
+\end{bmatrix}
+\end{equation}
+
+We solve this system using Cramer's rule. The determinant is:
+\begin{equation}
+\Delta = \begin{vmatrix}
+A & B \\
+B & C
+\end{vmatrix} = AC - B^2
+\end{equation}
+
+The solutions are:
+\begin{align}
+\lambda &= \frac{1}{\Delta} \begin{vmatrix}
+1 & B \\
+r_{target} & C
+\end{vmatrix} = \frac{C - r_{target}B}{AC - B^2} \label{eq:lambda} \\
+\gamma &= \frac{1}{\Delta} \begin{vmatrix}
+A & 1 \\
+B & r_{target}
+\end{vmatrix} = \frac{Ar_{target} - B}{AC - B^2} \label{eq:gamma}
+\end{align}
+
+
+Substituting equations~\eqref{eq:lambda} and~\eqref{eq:gamma} into equation~\eqref{eq:weight_unconstrained}, we obtain the optimal weight vector:
+\begin{equation}
+\mathbf{w} = \Sigma^{-1}\left(\frac{C - r_{target}B}{AC - B^2} \mathbf{1} + \frac{Ar_{target} - B}{AC - B^2} \bm{\mu}\right)
+\end{equation}
+
+
+\vspace{0.5cm}
+However, we need to add the non-negativity constraints. Indeed, the weight vector $\mathbf{w}$ is not guaranteed to be non-negative, and we require a long-only portfolio (i.e., $w_i \geq 0$ for all $i$). To solve this Quadratic Programming (QP) problem, we define the Lagrangian $\mathcal{L}$ with multipliers $\lambda$ (budget), $\gamma$ (return), and $\mathbf{z}$ (non-negativity):
+
+
+\begin{equation}
+\mathcal{L}(\mathbf{w}, \lambda, \gamma, \mathbf{z}) = \frac{1}{2} \mathbf{w}^T \Sigma \mathbf{w} - \lambda(\mathbf{w}^T \mathbf{1} - 1) - \gamma(\mathbf{w}^T \bm{\mu} - r_{target}) - \mathbf{z}^T \mathbf{w}
+\end{equation}
+
+
+The Karush-Kuhn-Tucker (KKT) first-order necessary conditions for optimality are:
+\begin{enumerate}
+    \item \textbf{Stationarity:} $\nabla_{\mathbf{w}} \mathcal{L} = \Sigma \mathbf{w} - \lambda \mathbf{1} - \gamma \bm{\mu} - \mathbf{z} = 0$
+    \item \textbf{Primal Feasibility:} $\mathbf{w}^T \mathbf{1} = 1$ and $\mathbf{w}^T \bm{\mu} = r_{target}$
+    \item \textbf{Dual Feasibility:} $z_i \geq 0$
+    \item \textbf{Complementary Slackness:} $z_i w_i = 0, \quad \forall i$
+\end{enumerate}
+
+
+
+\section{Spectral Instability and Ledoit-Wolf Shrinkage}
+The sample covariance matrix $S$ is often ill-conditioned. In the spectral domain, we represent $S$ via its eigen-decomposition $S = V \Lambda V^T$. The weight vector is sensitive to the inverse of the eigenvalues $\lambda_i$. If $\lambda_{min} \to 0$, the weights $\mathbf{w}$ exhibit extreme variance and instability.
+
+
+We implement the \textbf{Ledoit-Wolf Shrinkage} to regularize the spectrum. The estimator $\hat{\Sigma}_{LW}$ is a convex combination of $S$ and a highly structured target $F = \bar{\sigma}^2 I$:
+
+\begin{equation}
+\hat{\Sigma}_{LW} = (1 - \delta) S + \delta F
+\end{equation}    
+
+By shifting the eigenvalues $\lambda_i^{new} = (1-\delta)\lambda_i^{raw} + \delta \bar{\sigma}^2$, we bound the condition number $\kappa(\hat{\Sigma}_{LW})$ and stabilize the KKT system, preventing "corner solutions" driven by statistical noise.
+\newpage
+\section{Derivation of the Optimal Shrinkage Intensity}
+
+\subsection{Loss Function and First-Order Condition}
+The loss function $L(\delta)$ is defined as:
+\begin{equation}
+L(\delta) = E[\|\hat{\Sigma}(\delta) - \Sigma\|^2_{Fro}] = E[\text{Tr}((\hat{\Sigma}(\delta) - \Sigma)^T (\hat{\Sigma}(\delta) - \Sigma))]
+\end{equation}
+
+Defining the error terms $A = S - \Sigma$ and $B = F - S$, the estimator error can be rewritten as:
+\begin{equation}
+\hat{\Sigma}(\delta) - \Sigma = (S - \Sigma) + \delta(F - S) = A + \delta B
+\end{equation}
+
+Expanding the trace via linearity:
+\begin{equation}
+L(\delta) = E[\text{Tr}(A^T A)] + 2\delta E[\text{Tr}(B^T A)] + \delta^2 E[\text{Tr}(B^T B)]
+\end{equation}
+
+The first-order condition $\frac{dL}{d\delta} = 0$ yields the theoretical optimal intensity:
+\begin{equation}
+\delta^* = -\frac{E[\text{Tr}(B^T A)]}{E[\text{Tr}(B^T B)]}
+\end{equation}
+
+\subsection{Decomposition into $\pi, \rho,$ and $\gamma$ Parameters}
+To make this solution computable, we decompose the numerator and denominator into three fundamental parameters.
+
+\paragraph{The parameter $\gamma$ (Distance to structure):}
+This represents the expected energy of the displacement toward the target:
+\begin{equation}
+\gamma = E[\|F - S\|^2_{Fro}] = E[\text{Tr}(B^T B)]
+\end{equation}
+
+\paragraph{The parameter $\pi$ (Sample noise):}
+This corresponds to the sum of the variances of the elements in the sample matrix:
+\begin{equation}
+\pi = \sum_{i,j} \text{Var}(s_{ij}) = E[\text{Tr}(S^T S)] - \text{Tr}(\Sigma^T \Sigma)
+\end{equation}
+
+\paragraph{The parameter $\rho$ (Stochasticity correction):}
+Since $F$ is constructed from $S$, it shares a portion of the sampling error. This term captures the covariance between the errors of the target and the sample:
+\begin{equation}
+\rho = \sum_{i,j} \text{Cov}(f_{ij}, s_{ij}) = E[\text{Tr}(F^T S)] - \text{Tr}(F^T \Sigma)
+\end{equation}
+
+\subsection{Final Synthesis}
+Substituting these definitions into the expression for $\delta^*$, we find:
+\begin{equation}
+E[\text{Tr}(B^T A)] = E[\text{Tr}((F-S)^T(S-\Sigma))] = \rho - \pi
+\end{equation}
+Which leads to the optimal Ledoit-Wolf intensity:
+\begin{equation}
+\delta^* = \frac{\pi - \rho}{\gamma}
+\end{equation}
+
+\section{Implementation Interpretation}
+The intensity $\delta^*$ is the ratio of the net estimation error $(\pi - \rho)$ to the distance from the target structure $\gamma$. In our empirical application to French equities, if the market is highly volatile (high $\pi$) or the time series is short, the shrinkage becomes more aggressive ($\delta \to 1$). 
+
+The inclusion of $\rho$ is vital: it ensures that if the target $F$ drifts in the same direction as the error in $S$, the shrinkage intensity is reduced to avoid reinforcing a pre-existing statistical bias.
+\section{The Finite-Sample Estimator}
+In the population limit, the parameters $\pi$, $\rho$, and $\gamma$ represent asymptotic quantities. However, for a practical implementation with a sample of size $T$, we must acknowledge that the estimation variance of the sample covariance entries $s_{ij}$ is $O(1/T)$. 
+
+To maintain consistency with the Ledoit-Wolf (2004) framework, we define the practical shrinkage intensity as:
+\begin{equation}
+\hat{\delta}^* = \max \left( 0, \min \left( 1, \frac{1}{T} \frac{\hat{\pi} - \hat{\rho}}{\hat{\gamma}} \right) \right)
+\end{equation}
+where $\hat{\pi}$, $\hat{\rho}$, and $\hat{\gamma}$ are consistent estimators of their respective population parameters. 
+
+This formulation yields a critical asymptotic result:
+\begin{equation}
+\lim_{T \to \infty} \hat{\delta}^* = 0
+\end{equation}
+This implies that as the number of observations $T$ grows, the sample covariance $S$ converges in probability to the true covariance $\Sigma$, and the necessity for regularization through the target $F$ vanishes. This ensures that our optimizer remains statistically consistent while providing maximum stability in the high-dimensional regime where $N \approx T$.
+\end{document}

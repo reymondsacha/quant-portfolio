@@ -82,15 +82,7 @@ def run_pipeline(tickers: List[str], start_date: str, end_date: str):
 def main():
     # Define the list of core tickers to ingest
     CORE_TICKERS = [
-        "MC.PA",
-        "TTE.PA",
-        "AIR.PA",
-        "SAN.PA",
-        "OR.PA",
-        "BNP.PA",
-        "SU.PA",
-        "DG.PA",
-        "RMS.PA",
+        "AMZN"
     ]
 
     # Define the primary configuration (Dates)

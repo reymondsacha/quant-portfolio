@@ -20,6 +20,7 @@ data/processed/
 *.csv
 
 roadmap.md
+COMMIT_MSG.txt
 
 # LaTeX temporary files
 *.aux

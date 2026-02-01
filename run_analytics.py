@@ -60,15 +60,16 @@ def run_analytics():
 
     # 5. Run the Optimizer
     optimizer = MeanVarianceOptimizer(df_returns)
-    target_daily = 0.0007
-    compare_weights(optimizer, target_daily)
+    tangency = optimizer.find_tangency_portfolio(risk_free_rate=0.04, risk_free_rate_is_annual=True)
+    target_daily = tangency["return"]
+    compare_weights(optimizer, target_daily, tangency_weights=tangency["weights"])
 
     delta = optimizer.calculate_optimal_delta()
     logging.info(f"Optimal Delta: {delta:.2f}")
 
-    # 1. Reconstruct the Gradient of the Risk at the solution
+    # 1. Reconstruct the Gradient of the Risk at the solution (use tangency weights)
     # Risk Gradient = Sigma * w
-    w_array = np.array([optimizer.get_optimal_weights(target_daily, delta=delta)[ticker] for ticker in optimizer.tickers])
+    w_array = np.array([tangency["weights"][ticker] for ticker in optimizer.tickers])
     grad_risk = np.dot(optimizer._apply_ledoit_wolf_shrinkage(delta), w_array)
 
     # 2. Check Complementary Slackness: w_i * z_i should be 0
@@ -114,7 +115,12 @@ def run_analytics():
 
 
 
-def compare_weights(optimizer, target_return):
+def compare_weights(optimizer, target_return, tangency_weights=None):
+    """
+    Print weight comparison. If tangency_weights is provided (e.g. from
+    find_tangency_portfolio), the Shrunk column uses tangency weights so the
+    table matches the tangency star on the frontier plot.
+    """
     delta = optimizer.calculate_optimal_delta()
     # 1. Raw Markowitz (δ = 0)
     try:
@@ -123,11 +129,14 @@ def compare_weights(optimizer, target_return):
         w_raw = "FAILED TO CONVERGE"
         logging.error("Raw Weights: Failed to converge")
 
-    # 2. Ledoit-Wolf Shrunk (δ = 0.2)
-    w_shrunk = optimizer.get_optimal_weights(target_return, delta=delta)
+    # 2. Tangency / min-var at target (use tangency weights when at tangency return)
+    if tangency_weights is not None:
+        w_shrunk = {t: float(tangency_weights[t]) for t in optimizer.tickers}
+    else:
+        w_shrunk = optimizer.get_optimal_weights(target_return, delta=delta)
 
     print(
-        f"\n{'Ticker':<10} | {'Raw Weights (%)':<15} | {'Shrunk Weights (%)':<15}"
+        f"\n{'Ticker':<10} | {'Raw Weights (%)':<15} | {'Shrunk/Tangency (%)':<15}"
     )
     print("-" * 50)
     for t in optimizer.tickers:

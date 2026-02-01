@@ -3,7 +3,7 @@ import numpy.typing as npt
 import pandas as pd
 import logging
 from scipy.optimize import minimize
-from typing import Dict
+from typing import Dict, Optional
 
 logger = logging.getLogger("Optimizer")
 
@@ -21,6 +21,10 @@ class MeanVarianceOptimizer:
         """
         Initializes with a DataFrame of returns where columns are assets
         and rows are timestamps.
+
+        Units: Assumes returns are in a single period frequency (e.g. daily).
+        self.mu and self.S are then in that same frequency (daily if rows are days).
+        See UNITS.md for the full convention.
         """
         self.returns = returns
         self.tickers = list(returns.columns)
@@ -31,6 +35,98 @@ class MeanVarianceOptimizer:
         self.S = np.asarray(returns.cov())
         self.bounds = tuple((0.0, 1.0) for _ in range(self.n_assets))
         self.init_guess = np.repeat(1.0 / self.n_assets, self.n_assets)
+
+    def solve(
+        self,
+        *,
+        expected_returns: Optional[pd.Series] = None,
+        covariance: Optional[pd.DataFrame] = None,
+        risk_aversion: float = 1.0,
+        max_weights: float = 0.5,
+        long_only: bool = True,
+        tol: float = 1e-12,
+    ) -> pd.Series:
+        r"""
+        Solve the canonical mean-variance utility problem:
+
+        \[
+            \\max_w \\; \\mu^T w - \\frac{\\lambda}{2} w^T \\Sigma w
+            \\quad \\text{s.t.} \\quad \\mathbf{1}^T w = 1
+        \\]
+
+        This formulation is the correct "equilibrium check" for Black–Litterman:
+        if \\(\\Pi = \\lambda \\Sigma w_{mkt}\\) and there are no binding constraints,
+        the optimizer recovers \\(w_{mkt}\\).
+
+        Args:
+            expected_returns: Expected returns \\(\\mu\\) as a Series indexed by tickers.
+                If None, uses the sample mean from `self.returns`.
+                Units: Must match covariance (both daily or both annual). Do not mix.
+            covariance: Covariance matrix \\(\\Sigma\\) as a DataFrame with matching
+                index/columns. If None, uses the sample covariance from `self.returns`.
+                Units: Must match expected_returns (both daily or both annual). Do not mix.
+            risk_aversion: Risk aversion \\(\\lambda > 0\\).
+            long_only: If True, enforce \\(0 \\le w_i \\le 1\\).
+            tol: Numerical tolerance passed to SLSQP.
+
+        Returns:
+            pd.Series: Optimal weights indexed by tickers.
+        """
+        if risk_aversion <= 0:
+            raise ValueError("risk_aversion must be positive.")
+
+        if expected_returns is None:
+            mu_s = pd.Series(self.mu, index=self.tickers, name="mu")
+        else:
+            mu_s = expected_returns.reindex(self.tickers).astype(float)
+            if mu_s.isna().any():
+                missing = list(mu_s[mu_s.isna()].index)
+                raise ValueError(f"expected_returns missing required tickers: {missing}")
+
+        if covariance is None:
+            sigma_df = pd.DataFrame(self.S, index=self.tickers, columns=self.tickers)
+        else:
+            if not isinstance(covariance, pd.DataFrame):
+                raise TypeError("covariance must be a pandas DataFrame.")
+            sigma_df = covariance.reindex(index=self.tickers, columns=self.tickers).astype(float)
+            if sigma_df.isna().any().any():
+                raise ValueError("covariance missing required tickers (NaNs after reindex).")
+
+        if max_weights * self.n_assets < 1.0:
+            raise ValueError(f"Infeasible:  max_weights {max_weights} is too low for {self.n_assets} assets.")
+
+        sigma = np.asarray(sigma_df.values, dtype=float)
+        mu = np.asarray(mu_s.values, dtype=float)
+
+        # Minimize the convex equivalent:
+        #   min_w (lambda/2) w^T Sigma w - mu^T w
+        def objective(w: npt.NDArray[np.floating]) -> float:
+            return float(0.5 * risk_aversion * (w.T @ sigma @ w) - (mu.T @ w))
+
+        def objective_jacobian(w: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
+            return (risk_aversion * (sigma @ w) - mu).astype(float)
+
+        constraints = [
+            {"type": "eq", "fun": lambda w: np.sum(w) - 1.0, "jac": lambda w: np.ones(self.n_assets)},
+        ]
+
+        bounds = tuple((0, max_weights) for _ in range(self.n_assets)) if long_only else tuple((None, None) for _ in range(self.n_assets))
+        w0 = np.ones(self.n_assets) / self.n_assets
+
+        result = minimize(
+            fun=objective,
+            x0=w0,
+            method="SLSQP",
+            bounds=bounds,
+            constraints=constraints,
+            jac=objective_jacobian,
+            tol=tol,
+        )
+
+        if not result.success:
+            raise ValueError(f"Optimization failed: {result.message}")
+
+        return pd.Series(result.x, index=self.tickers, name="weights")
 
     def _apply_ledoit_wolf_shrinkage(self, delta) -> np.ndarray:
         """
@@ -93,9 +189,11 @@ class MeanVarianceOptimizer:
         }, index=self.tickers)
 
 
-    def get_optimal_weights(self, target_return: float, delta: float, l2_lambda: float=0.01) -> Dict[str, float]:
+    def get_optimal_weights(self, target_return: float, delta: float) -> Dict[str, float]:
         """
         Solves the KKT system for a Long Only Portfolio.
+
+        Units: target_return must be in the same frequency as self.mu (e.g. daily).
         """
         # 1. Get the Stabilized Covariance Matrix
         sigma_stable = self._apply_ledoit_wolf_shrinkage(delta)
@@ -168,12 +266,27 @@ class MeanVarianceOptimizer:
         return max(0, min(delta_star, 1))
 
 
-    def find_tangency_portfolio(self, risk_free_rate: float=0.0424):
+    def find_tangency_portfolio(
+        self,
+        risk_free_rate: float = 0.04,
+        risk_free_rate_is_annual: bool = True,
+    ):
         """
-        Solves for the Max Sharpe Ratio using the Charne-Cooper Transformation.
+        Solves for the Max Sharpe Ratio using the Charnes-Cooper Transformation.
         Minimizes y.T @ Sigma @ y s.t. (mu - rf1).T @ y = 1
+
+        Args:
+            risk_free_rate: Risk-free rate. Interpreted as **annual** (e.g. 0.04)
+                when risk_free_rate_is_annual is True, else same frequency as self.mu.
+            risk_free_rate_is_annual: If True, risk_free_rate is in annual terms;
+                it is converted to daily via (1 + r_ann)^(1/252) - 1 to match self.mu.
         """
-        mu_excess =  self.mu - risk_free_rate
+        if risk_free_rate_is_annual:
+            # Convert annual to daily: r_daily = (1 + r_ann)^(1/252) - 1
+            rf = float((1.0 + risk_free_rate) ** (1.0 / 252.0) - 1.0)
+        else:
+            rf = float(risk_free_rate)
+        mu_excess = self.mu - rf
         delta = self.calculate_optimal_delta()
         sigma = self._apply_ledoit_wolf_shrinkage(delta=delta)
 
@@ -195,7 +308,8 @@ class MeanVarianceOptimizer:
             method="SLSQP",
             constraints=constraints,
             jac=obj_jacobian,
-            bounds=y_bounds
+            bounds=y_bounds,
+            tol=1e-7
         )
  
         if not res.success:
@@ -204,7 +318,8 @@ class MeanVarianceOptimizer:
         y_star = res.x
         weights = y_star / np.sum(y_star)
 
-        return{
+        # Return and volatility are in same frequency as self.mu (e.g. daily)
+        return {
             'weights': pd.Series(weights, index=self.tickers),
             'return': np.dot(self.mu, weights),
             'volatility': np.sqrt(np.dot(weights.T, np.dot(sigma, weights)))
@@ -214,6 +329,8 @@ class MeanVarianceOptimizer:
         """
         Maps the Efficient Frontier using a sweep of target returns.
         Uses the 'Feasibility Check' logic to bound the search.
+
+        Units: frontier_rets and frontier_vols are in same frequency as self.mu (e.g. daily).
         """
         min_ret = np.min(self.mu)
         max_ret = np.max(self.mu)
@@ -227,11 +344,12 @@ class MeanVarianceOptimizer:
 
         for target in target_returns:
             try:
+                # Capture target in closure (default arg) so each iteration uses its own target
                 constraints = [
                     {'type': 'eq', 'fun': lambda w: np.sum(w) - 1, 'jac': lambda w: np.ones(self.n_assets)},
-                    {'type': 'eq', 'fun': lambda w: np.dot(w.T, self.mu) - target, 'jac': lambda w: self.mu}
+                    {'type': 'eq', 'fun': lambda w, t=target: np.dot(w.T, self.mu) - t, 'jac': lambda w: self.mu}
                 ]
-     
+
                 res = minimize(
                     lambda w: np.dot(w.T, np.dot(sigma, w)),
                     x0=self.init_guess,
@@ -241,21 +359,34 @@ class MeanVarianceOptimizer:
                 )
 
                 w_dict = self.get_optimal_weights(target, delta=delta)
-                w_array= np.array([w_dict[t] for t in self.tickers])
+                w_array = np.array([w_dict[t] for t in self.tickers])
 
                 vol = np.sqrt(np.dot(w_array.T, np.dot(sigma, w_array)))
-
 
                 if res.success:
                     frontier_vols.append(vol)
                     frontier_rets.append(target)
-                    weights_list.append(res.x)
+                    # Use get_optimal_weights so graph matches run_analytics / compare_weights
+                    weights_list.append(w_array)
             except InfeasibleConstraintError:
                 continue
         return np.array(frontier_vols), np.array(frontier_rets), np.array(weights_list)
             
         
 
+    def compute_active_share(self, market_weights: pd.Series, portfolio_weights: pd.Series) -> float:
+        """
+        Computes the Active Share of a portfolio compared to the market.
+        """
+        active_weights = portfolio_weights - market_weights
+        return (1/2) * np.sum(np.abs(active_weights))
+
+    def compute_active_error(self, S, market_weights: pd.Series, portfolio_weights: pd.Series) -> float:
+        """
+        Computes the Active Error of a portfolio compared to the market.
+        """
+        active_weights = portfolio_weights - market_weights
+        return np.sqrt(np.dot(active_weights.T, np.dot(S, active_weights)))
 
     
 

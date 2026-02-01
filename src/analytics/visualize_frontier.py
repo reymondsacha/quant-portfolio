@@ -7,9 +7,8 @@ def plot_comprehensive_frontier(df_returns, optimizer, delta):
     # 1. Generate Frontier Data
     vols, rets, weights = optimizer.generate_frontier(n_points=100)
     
-    # 2. Find Tangency Portfolio (Annualized rf = 4% -> Daily rf approx 0.00016)
-    daily_rf = (1 + 0.04)**(1/252) - 1
-    tangency = optimizer.find_tangency_portfolio(risk_free_rate=daily_rf)
+    # 2. Find Tangency Portfolio (same definition as run_analytics: 4% annual rf)
+    tangency = optimizer.find_tangency_portfolio(risk_free_rate=0.04, risk_free_rate_is_annual=True)
     
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 14), gridspec_kw={'hspace': 0.3})
 

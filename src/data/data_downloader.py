@@ -19,11 +19,8 @@ class YahooDownloader:
     and returning the DataFrame payload. It performs defensive data cleaning.
     """
 
-    # --- Validation Methods (KEEP THESE, they are excellent utility methods) ---
     @staticmethod
     def _validate_tickers(tickers: List[str]) -> None:
-        # Note: Now used to validate the *input* list in fetch_history, if we designed it that way,
-        # but since we call yf.download with a single string, we adapt the logic.
         if not isinstance(tickers, list) or not tickers:
             raise ValueError("Tickers must be a non-empty list of strings.")
         if not all(isinstance(t, str) and t.strip() for t in tickers):
@@ -43,7 +40,6 @@ class YahooDownloader:
         if start > end:
             raise ValueError("start_date must be before or equal to end_date.")
 
-    # ------------------------------------------------------------------------
     @retry(retries=3, delay=2, backoff=2)
     def fetch_history(
         self, ticker: str, start_date: str, end_date: str
@@ -59,33 +55,26 @@ class YahooDownloader:
         Returns:
             pd.DataFrame: The fetched data (or an empty DF if not found).
         """
-        # Validate the specific call arguments
-        # Since we removed __init__, validation moves to the fetch method.
-        # Note: You can skip date validation if you're sure main.py provides good input,
-        # but for robustness, it stays.
         self._validate_date_format(start_date)
         self._validate_date_format(end_date)
         self._validate_date_order(start_date, end_date)
 
         try:
-            # yfinance call now uses the passed arguments
             df = yf.download(
-                tickers=ticker,  # <--- Single ticker passed as string
+                tickers=ticker,  
                 start=start_date,
                 end=end_date,
                 auto_adjust=True,
                 progress=False,
-                group_by="ticker",  # Keep the MultiIndex (Field, Ticker) structure
+                group_by="ticker", 
             )
 
-            # Defensive check: Ensure df is not None and is a DataFrame
             if df is None or not isinstance(df, pd.DataFrame):
                 raise SymbolNotFoundError(
                     ticker, "No data returned from Yahoo Finance."
                 )
 
             if df.empty:
-                # LOG WARNING before raising EmptyDataError for internal checks
                 logger.warning(
                     f"No data returned from Yahoo Finance for {ticker}. Returning empty DataFrame."
                 )
@@ -93,28 +82,22 @@ class YahooDownloader:
                     ticker, "No data returned from Yahoo Finance."
                 )
 
-            # --- DEFENSIVE MULTIINDEX FIX (Kept from your final working code) ---
             if isinstance(df.columns, pd.MultiIndex):
                 level0 = df.columns.levels[0]
-
-                # Heuristic
                 known_fields = ["Open", "High", "Low", "Close", "Volume"]
                 if set(level0) & set(known_fields):
                     df.columns = df.columns.swaplevel(0, 1)
                 df = df.sort_index(axis=1)
-            # ------------------------------------------------------------------
 
             # If it's a single ticker, we ensure it's wrapped in a MultiIndex
             # to be consistent with the multi-ticker output structure,
-            # as your original code intended (though this might be simplified later).
-            # We keep the structure that passed your 100% tests.
             if not isinstance(df.columns, pd.MultiIndex):
                 # This handles the case where yfinance gives simple columns for a single ticker
                 df.columns = pd.MultiIndex.from_product(
                     [[ticker], df.columns], names=["Ticker", "Field"]
                 )
 
-            return df  # <--- KEY CHANGE: Returns the DataFrame payload
+            return df 
 
         except SymbolNotFoundError:
             # Return an empty DataFrame on failure so the orchestrator can continue
@@ -129,3 +112,23 @@ class YahooDownloader:
             raise RuntimeError(
                 f"Failed to fetch data from Yahoo Finance for {ticker}: {e}"
             ) from e
+
+
+    def fetch_ticker_metadata(self, ticker: str):
+        """
+        Fetches latest metadata for a single ticker using fast_info.
+        Returns a dictionary of key metrics.
+        """
+        tk = yf.Ticker(ticker)
+        try:
+            info = tk.fast_info
+            return {
+                "ticker": ticker,
+                "shares_outstanding": info.get("shares")
+            }
+
+        except Exception as e:
+            logger.warning(f"Could not fetch metadata for {ticker}: {e}")
+            return {"ticker": ticker, "shares_outstanding": None}
+
+

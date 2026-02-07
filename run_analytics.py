@@ -2,7 +2,7 @@ import pandas as pd
 import logging
 import numpy as np
 from src.data.data_manager import DataManager
-from src.analytics.optimizer import MeanVarianceOptimizer
+from src.analytics.mvo_optimizer import MeanVarianceOptimizer
 
 # Setup Logging
 logging.basicConfig(
@@ -44,7 +44,7 @@ def run_analytics():
             print(f"Error loading {ticker}: {e}")
 
     if not all_data:
-        return
+        raise RuntimeError("No data loaded")
 
     # 4. Prepare the matrix for math
     df_raw = pd.concat(all_data, ignore_index=True)
@@ -55,12 +55,15 @@ def run_analytics():
     logging.info(f"Optimization Matrix Ready: {df_returns.shape}")
 
     coverage = df_prices.notna().mean()
-    if coverage.min() < 0.8:
+    min_coverage = coverage.min() if isinstance(coverage, pd.Series) else float(coverage)
+    if min_coverage < 0.8:
         logging.warning("Warning: Some assets have less than 80% data coverage.")
 
     # 5. Run the Optimizer
     optimizer = MeanVarianceOptimizer(df_returns)
-    tangency = optimizer.find_tangency_portfolio(risk_free_rate=0.04, risk_free_rate_is_annual=True)
+    tangency = optimizer.find_tangency_portfolio(
+        risk_free_rate=0.04, risk_free_rate_is_annual=True
+    )
     target_daily = tangency["return"]
     compare_weights(optimizer, target_daily, tangency_weights=tangency["weights"])
 
@@ -73,24 +76,19 @@ def run_analytics():
     grad_risk = np.dot(optimizer._apply_ledoit_wolf_shrinkage(delta), w_array)
 
     # 2. Check Complementary Slackness: w_i * z_i should be 0
-    # We can't see z directly easily, but we know that if w_i > 0, 
+    # We can't see z directly easily, but we know that if w_i > 0,
     # then the marginal risk must be a linear combination of return and budget.
     # For all assets where weight > 1e-4:
     active_indices = np.where(w_array > 1e-4)[0]
 
     if len(active_indices) >= 2:
-    # Pick two active assets (i and j)
-        i, j = active_indices[0], active_indices[1]
-    
-    # At the optimum, for any two active assets:
-    # (Marginal Risk_i - Marginal Risk_j) should be proportional to (mu_i - mu_j)
-    # This is a deep KKT property!
-    risk_diff = grad_risk[i] - grad_risk[j]
-    mu_diff = optimizer.mu[i] - optimizer.mu[j]
-    
-    logging.info(f"KKT Verification - Risk/Mu Ratio: {risk_diff/mu_diff:.6f}")
-
-
+        # Pick two active assets (i and j)
+        i, j = int(active_indices[0]), int(active_indices[1])
+        # At the optimum, for any two active assets:
+        # (Marginal Risk_i - Marginal Risk_j) should be proportional to (mu_i - mu_j)
+        risk_diff = grad_risk[i] - grad_risk[j]
+        mu_diff = optimizer.mu[i] - optimizer.mu[j]
+        logging.info(f"KKT Verification - Risk/Mu Ratio: {risk_diff / mu_diff:.6f}")
 
     # Compute the condition number of the Raw vs Shrunk matrix
     cond_raw = np.linalg.cond(optimizer.S)
@@ -114,7 +112,6 @@ def run_analytics():
     return df_returns, optimizer, delta
 
 
-
 def compare_weights(optimizer, target_return, tangency_weights=None):
     """
     Print weight comparison. If tangency_weights is provided (e.g. from
@@ -135,24 +132,27 @@ def compare_weights(optimizer, target_return, tangency_weights=None):
     else:
         w_shrunk = optimizer.get_optimal_weights(target_return, delta=delta)
 
-    print(
-        f"\n{'Ticker':<10} | {'Raw Weights (%)':<15} | {'Shrunk/Tangency (%)':<15}"
-    )
+    print(f"\n{'Ticker':<10} | {'Raw Weights (%)':<15} | {'Shrunk/Tangency (%)':<15}")
     print("-" * 50)
     for t in optimizer.tickers:
-        raw_val = f"{w_raw[t]:.2%}" if isinstance(w_raw, dict) else "N/A"
+        if isinstance(w_raw, (dict, pd.Series)) and t in w_raw:
+            raw_val = f"{w_raw[t]:.2%}"
+        else:
+            raw_val = "N/A"
         shrunk_val = f"{w_shrunk[t]:.2%}"
         print(f"{t:<10} | {raw_val:<15} | {shrunk_val:<15}")
 
 
-
 if __name__ == "__main__":
     # 1. Run the math
-    df_returns, optimizer, delta = run_analytics()
-    
+    result = run_analytics()
+    if result is None:
+        raise RuntimeError("run_analytics() returned None")
+    df_returns, optimizer, delta = result
+
     # 2. Import the visualization function here
     from src.analytics.visualize_frontier import plot_comprehensive_frontier
-    
+
     # 3. Execute the plots
     logging.info("Generating Frontier Visualizations...")
     plot_comprehensive_frontier(df_returns, optimizer, delta)

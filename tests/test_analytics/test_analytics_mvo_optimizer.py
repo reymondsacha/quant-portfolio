@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 import pandas as pd
-from src.analytics.optimizer import MeanVarianceOptimizer
+from src.analytics.mvo_optimizer import MeanVarianceOptimizer
 
 
 @pytest.fixture
@@ -27,9 +27,9 @@ def optimizer():
 
 
 def test_kkt_constraints(optimizer):
-    target = 0.0005
+    target = 0.0016
     weights = optimizer.get_optimal_weights(target_return=target, delta=0.2)
-    w_array = np.array(list(weights.values()))
+    w_array = weights.reindex(optimizer.tickers).to_numpy(dtype=float)
     mu = optimizer.mu
     returns = np.dot(w_array, mu)
     assert returns >= (target - 1e-7)
@@ -43,3 +43,5 @@ def test_ledoit_wolf_shrinkage(optimizer):
     delta = optimizer.calculate_optimal_delta()
     sigma_stable = optimizer._apply_ledoit_wolf_shrinkage(delta)
     assert np.allclose(sigma_stable, sigma_stable.T)
+
+

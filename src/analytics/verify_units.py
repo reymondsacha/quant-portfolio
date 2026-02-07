@@ -10,22 +10,26 @@ import numpy as np
 import pandas as pd
 
 # Typical magnitude bounds (order of magnitude)
-DAILY_RETURN_ABS_MAX = 0.05   # |daily return| rarely > 5%
-ANNUAL_RETURN_ABS_MAX = 2.0   # |annual return| rarely > 200%
-DAILY_VAR_MAX = 0.01          # daily variance rarely > 1%
-ANNUAL_VAR_MAX = 5.0           # annual variance can be large
+DAILY_RETURN_ABS_MAX = 0.05  # |daily return| rarely > 5%
+ANNUAL_RETURN_ABS_MAX = 2.0  # |annual return| rarely > 200%
+DAILY_VAR_MAX = 0.01  # daily variance rarely > 1%
+ANNUAL_VAR_MAX = 5.0  # annual variance can be large
 
 
 def _looks_daily_returns(series: pd.Series | np.ndarray) -> bool:
     """True if magnitudes look like daily returns (e.g. mean abs < 0.02)."""
     x = np.asarray(series).ravel()
-    return np.abs(x).max() <= DAILY_RETURN_ABS_MAX and np.median(np.abs(x)) <= 0.01
+    return bool(
+        np.abs(x).max() <= DAILY_RETURN_ABS_MAX and np.median(np.abs(x)) <= 0.01
+    )
 
 
 def _looks_annual_returns(series: pd.Series | np.ndarray) -> bool:
     """True if magnitudes look like annual returns (e.g. typical 0.05--0.5)."""
     x = np.asarray(series).ravel()
-    return np.any(np.abs(x) >= 0.01) and np.abs(x).max() <= ANNUAL_RETURN_ABS_MAX
+    return bool(
+        np.any(np.abs(x) >= 0.01) and np.abs(x).max() <= ANNUAL_RETURN_ABS_MAX
+    )
 
 
 def _looks_daily_covariance(matrix: np.ndarray | pd.DataFrame) -> bool:
@@ -34,7 +38,7 @@ def _looks_daily_covariance(matrix: np.ndarray | pd.DataFrame) -> bool:
     if m.ndim != 2 or m.shape[0] != m.shape[1]:
         return False
     diag = np.diag(m)
-    return np.all(diag >= 0) and np.max(diag) <= DAILY_VAR_MAX
+    return bool(np.all(diag >= 0) and np.max(diag) <= DAILY_VAR_MAX)
 
 
 def _looks_annual_covariance(matrix: np.ndarray | pd.DataFrame) -> bool:
@@ -43,7 +47,11 @@ def _looks_annual_covariance(matrix: np.ndarray | pd.DataFrame) -> bool:
     if m.ndim != 2 or m.shape[0] != m.shape[1]:
         return False
     diag = np.diag(m)
-    return np.all(diag >= 0) and np.max(diag) >= 0.01 and np.max(diag) <= ANNUAL_VAR_MAX
+    return bool(
+        np.all(diag >= 0)
+        and np.max(diag) >= 0.01
+        and np.max(diag) <= ANNUAL_VAR_MAX
+    )
 
 
 def check_optimizer_units(optimizer) -> list[str]:
@@ -109,7 +117,10 @@ def check_solve_inputs(
 
     if expected_returns is None and covariance is not None:
         # Expected returns from optimizer (e.g. daily)
-        if _looks_annual_covariance(np.asarray(covariance)) and optimizer_mu_scale == "daily":
+        if (
+            _looks_annual_covariance(np.asarray(covariance))
+            and optimizer_mu_scale == "daily"
+        ):
             issues.append(
                 "solve(): covariance looks ANNUAL but expected_returns will be "
                 "taken from optimizer (daily). Do not mix. Pass expected_returns "
@@ -118,6 +129,7 @@ def check_solve_inputs(
         return issues
 
     # Both provided: must be same scale
+    assert expected_returns is not None and covariance is not None
     ret_daily = _looks_daily_returns(expected_returns)
     ret_annual = _looks_annual_returns(expected_returns)
     cov_daily = _looks_daily_covariance(covariance)
@@ -182,11 +194,12 @@ def run_all_checks(optimizer=None, df_returns: pd.DataFrame | None = None):
         n_days, n_assets = 252, 5
         df_returns = pd.DataFrame(
             np.random.randn(n_days, n_assets) * 0.01,
-            columns=[f"A{i}" for i in range(n_assets)],
+            columns=pd.Index([f"A{i}" for i in range(n_assets)]),
         )
 
     if optimizer is None:
-        from src.analytics.optimizer import MeanVarianceOptimizer
+        from src.analytics.mvo_optimizer import MeanVarianceOptimizer
+
         optimizer = MeanVarianceOptimizer(df_returns)
 
     messages = []
@@ -195,16 +208,24 @@ def run_all_checks(optimizer=None, df_returns: pd.DataFrame | None = None):
 
     # Check solve() with annual Pi + annual Sigma (as in BL notebook) is consistent
     n = len(optimizer.tickers)
-    pi_ann = pd.Series(np.full(n, 0.10), index=optimizer.tickers)
-    sigma_ann = pd.DataFrame(0.05 * np.eye(n) + 0.01, index=optimizer.tickers, columns=optimizer.tickers)
+    tickers_index = pd.Index(optimizer.tickers)
+    pi_ann = pd.Series(np.full(n, 0.10), index=tickers_index)
+    sigma_ann = pd.DataFrame(
+        0.05 * np.eye(n) + 0.01,
+        index=tickers_index,
+        columns=tickers_index,
+    )
     issues_solve = check_solve_inputs(pi_ann, sigma_ann, optimizer_mu_scale="daily")
     messages.extend(issues_solve)
 
     # Check BL risk_aversion with annual inputs
     from src.analytics.black_litterman import BlackLittermanModel
+
     bl = BlackLittermanModel(risk_free_rate=0.04)
     lam = bl.calculate_risk_aversion(benchmark_return=0.08, benchmark_var=0.04)
-    pi_bl = bl.calculate_implied_returns(sigma_ann, pd.Series(1.0 / n, index=optimizer.tickers), lam)
+    pi_bl = bl.calculate_implied_returns(
+        sigma_ann, pd.Series(1.0 / n, index=optimizer.tickers), lam
+    )
     issues_bl = check_black_litterman_inputs(0.08, 0.04, sigma_ann, pi_bl)
     messages.extend(issues_bl)
 

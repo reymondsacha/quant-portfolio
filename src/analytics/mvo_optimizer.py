@@ -3,38 +3,85 @@ import numpy.typing as npt
 import pandas as pd
 import logging
 from scipy.optimize import minimize
-from typing import Dict, Optional
+from typing import Dict, Optional, cast
 
 logger = logging.getLogger("Optimizer")
+
 
 class InfeasibleConstraintError(Exception):
     """
     Raised when the target return is outside the feasible range [MinVar_Return, MaxReturn]
     """
+
     pass
+
 
 class MeanVarianceOptimizer:
     mu: npt.NDArray[np.floating]
     S: npt.NDArray[np.floating]
 
-    def __init__(self, returns: pd.DataFrame):
+    def __init__(self, returns: pd.DataFrame, frequency: int = 252):
         """
         Initializes with a DataFrame of returns where columns are assets
         and rows are timestamps.
 
-        Units: Assumes returns are in a single period frequency (e.g. daily).
-        self.mu and self.S are then in that same frequency (daily if rows are days).
+        Units:
+            - Assumes `returns` are in a single-period frequency (e.g. **daily**).
+            - `self.mu` and `self.S` are in that same frequency (e.g. daily).
+            - `self.frequency` is the number of periods per year (default 252).
+              It is only used for unit diagnostics and documentation – it does
+              **not** rescale inputs automatically.
+
         See UNITS.md for the full convention.
         """
         self.returns = returns
         self.tickers = list(returns.columns)
         self.n_assets = len(self.tickers)
+        self.frequency: int = int(frequency)
 
         # Calculate Sample Mean (mu) and Sample Covariance (S)
         self.mu = np.asarray(returns.mean())
         self.S = np.asarray(returns.cov())
         self.bounds = tuple((0.0, 1.0) for _ in range(self.n_assets))
         self.init_guess = np.repeat(1.0 / self.n_assets, self.n_assets)
+
+    def _validate_units(self, mu: pd.Series, sigma_df: pd.DataFrame) -> None:
+        """
+        Lightweight diagnostic to catch obvious unit mismatches between
+        expected returns and covariance.
+
+        Heuristic:
+            - If |mu| is "annual-like" (~5–50%) **and**
+              diag(cov) is "daily-like" (~1e-6–1e-3), we raise.
+            - Conversely, if |mu| is "daily-like" (~0–1%) **and**
+              diag(cov) is "annual-like" (> 1e-2), we also raise.
+        """
+        if sigma_df.shape[0] != sigma_df.shape[1]:
+            raise ValueError("covariance must be square for unit diagnostics.")
+
+        mean_abs_mu = float(mu.abs().mean())
+        diag_var = np.diag(sigma_df.values.astype(float))
+        mean_var = float(np.mean(diag_var))
+
+        # Basic sanity: non-negative variance
+        if mean_var < 0:
+            raise ValueError("covariance has negative average variance – invalid input.")
+
+        # Guard: annual mu with daily cov
+        if 0.05 <= mean_abs_mu <= 0.5 and 0.0 < mean_var <= 1e-3:
+            raise ValueError(
+                "Unit mismatch detected: expected_returns look annual "
+                "while covariance looks daily-scale. Rescale one of them "
+                f"so they share a common frequency (e.g. both annual or both {self.frequency}-period)."
+            )
+
+        # Guard: daily mu with annual cov
+        if 0.0 < mean_abs_mu <= 0.01 and mean_var >= 1e-2:
+            raise ValueError(
+                "Unit mismatch detected: expected_returns look single-period "
+                "while covariance looks annual-scale. Rescale one of them "
+                f"so they share a common frequency (e.g. both annual or both {self.frequency}-period)."
+            )
 
     def solve(
         self,
@@ -80,20 +127,35 @@ class MeanVarianceOptimizer:
         else:
             mu_s = expected_returns.reindex(self.tickers).astype(float)
             if mu_s.isna().any():
-                missing = list(mu_s[mu_s.isna()].index)
-                raise ValueError(f"expected_returns missing required tickers: {missing}")
+                missing = list(cast(pd.Index, mu_s.index[mu_s.isna()]))
+                raise ValueError(
+                    f"expected_returns missing required tickers: {missing}"
+                )
 
         if covariance is None:
-            sigma_df = pd.DataFrame(self.S, index=self.tickers, columns=self.tickers)
+            sigma_df = pd.DataFrame(
+                self.S,
+                index=pd.Index(self.tickers),
+                columns=pd.Index(self.tickers),
+            )
         else:
             if not isinstance(covariance, pd.DataFrame):
                 raise TypeError("covariance must be a pandas DataFrame.")
-            sigma_df = covariance.reindex(index=self.tickers, columns=self.tickers).astype(float)
-            if sigma_df.isna().any().any():
-                raise ValueError("covariance missing required tickers (NaNs after reindex).")
+            sigma_df = covariance.reindex(
+                index=self.tickers, columns=self.tickers
+            ).astype(float)
+            if bool(sigma_df.isna().to_numpy().any()):
+                raise ValueError(
+                    "covariance missing required tickers (NaNs after reindex)."
+                )
+
+        # Guard-rail against daily/annual mismatches
+        self._validate_units(mu_s, sigma_df)
 
         if max_weights * self.n_assets < 1.0:
-            raise ValueError(f"Infeasible:  max_weights {max_weights} is too low for {self.n_assets} assets.")
+            raise ValueError(
+                f"Infeasible:  max_weights {max_weights} is too low for {self.n_assets} assets."
+            )
 
         sigma = np.asarray(sigma_df.values, dtype=float)
         mu = np.asarray(mu_s.values, dtype=float)
@@ -107,10 +169,18 @@ class MeanVarianceOptimizer:
             return (risk_aversion * (sigma @ w) - mu).astype(float)
 
         constraints = [
-            {"type": "eq", "fun": lambda w: np.sum(w) - 1.0, "jac": lambda w: np.ones(self.n_assets)},
+            {
+                "type": "eq",
+                "fun": lambda w: np.sum(w) - 1.0,
+                "jac": lambda w: np.ones(self.n_assets),
+            },
         ]
 
-        bounds = tuple((0, max_weights) for _ in range(self.n_assets)) if long_only else tuple((None, None) for _ in range(self.n_assets))
+        bounds = (
+            tuple((0, max_weights) for _ in range(self.n_assets))
+            if long_only
+            else tuple((None, None) for _ in range(self.n_assets))
+        )
         w0 = np.ones(self.n_assets) / self.n_assets
 
         result = minimize(
@@ -141,7 +211,9 @@ class MeanVarianceOptimizer:
         # Shrunk Matrix Sigma_stable = (1-delta) * S + delta * F
         return (1 - delta) * self.S + delta * F
 
-    def check_feasibility(self, target_return: float, sigma: npt.NDArray[np.floating]) -> bool:
+    def check_feasibility(
+        self, target_return: float, sigma: npt.NDArray[np.floating]
+    ) -> bool:
         """
         Feasibility Check: The target return must be between the return of the
         Global Minimum Variance (GMV) portfolio and the maximum individual asset.
@@ -157,46 +229,73 @@ class MeanVarianceOptimizer:
             raise InfeasibleConstraintError(
                 f"Target {target_return:.4f} is below GMV return {gmv_return:.4f}."
             )
-            return gmv_return
-        
+
         if target_return > max_asset_return:
             raise InfeasibleConstraintError(
                 f"Target {target_return:.4f} exceeds max asset return {max_asset_return:.4f}."
             )
 
-        return target_return
+        return True
 
-    def calculate_risk_decomposition(self, weights_dict: Dict[str, float], delta: float)->pd.DataFrame:
+    def calculate_risk_decomposition(
+        self, weights_dict: Dict[str, float], delta: float
+    ) -> pd.DataFrame:
         """
         Implements the Euler Identity: sigma_p = sum(w_i * MCR_i).
         """
         w = np.array([weights_dict[ticker] for ticker in self.tickers])
         sigma = self._apply_ledoit_wolf_shrinkage(delta)
 
-        #Portfolio Volatility: sqrt(w^T * sigma * w)
+        # Portfolio Volatility: sqrt(w^T * sigma * w)
         port_vol = np.sqrt(w.T @ sigma @ w)
 
-        #Marginal Contribution to Risk (MCR): (Sigma * w) / sigma_p
+        # Marginal Contribution to Risk (MCR): (Sigma * w) / sigma_p
         mcr = (sigma @ w) / port_vol
 
-        #Percentage Contribution to Risk (PCR) (%CR): (w_i * MCR_i) / sigma_p
+        # Percentage Contribution to Risk (PCR) (%CR): (w_i * MCR_i) / sigma_p
         p_cr = (w * mcr) / port_vol
 
-        return pd.DataFrame({
-            'Weight': w,
-            'Marginal_Risk': mcr,
-            'Percent_Contribution': p_cr
-        }, index=self.tickers)
+        return pd.DataFrame(
+            {"Weight": w, "Marginal_Risk": mcr, "Percent_Contribution": p_cr},
+            index=pd.Index(self.tickers),
+        )
 
-
-    def get_optimal_weights(self, target_return: float, delta: float) -> Dict[str, float]:
+    def get_optimal_weights(
+        self,
+        target_return: float,
+        delta: float,
+        covariance: Optional[pd.DataFrame] = None,
+    ) -> pd.Series:
         """
         Solves the KKT system for a Long Only Portfolio.
 
-        Units: target_return must be in the same frequency as self.mu (e.g. daily).
+        Units:
+            - `target_return` must be in the same frequency as `self.mu`
+              and `covariance` (e.g. all daily or all annual).
+            - If `covariance` is provided it is **used as-is** and no
+              internal shrinkage is computed.
         """
-        # 1. Get the Stabilized Covariance Matrix
-        sigma_stable = self._apply_ledoit_wolf_shrinkage(delta)
+        # 1. Get the Stabilized Covariance Matrix (or trust injected covariance)
+        if covariance is None:
+            sigma_stable = self._apply_ledoit_wolf_shrinkage(delta)
+            sigma_df = pd.DataFrame(
+                sigma_stable, index=self.tickers, columns=self.tickers
+            )
+        else:
+            if not isinstance(covariance, pd.DataFrame):
+                raise TypeError("covariance must be a pandas DataFrame.")
+            sigma_df = covariance.reindex(
+                index=self.tickers, columns=self.tickers
+            ).astype(float)
+            if bool(sigma_df.isna().to_numpy().any()):
+                raise ValueError(
+                    "covariance missing required tickers (NaNs after reindex)."
+                )
+            sigma_stable = np.asarray(sigma_df.values, dtype=float)
+
+        # Unit diagnostics
+        mu_s = pd.Series(self.mu, index=self.tickers, name="mu")
+        self._validate_units(mu_s, sigma_df)
         self.check_feasibility(target_return, sigma_stable)
 
         # 2. Define the Quadratic Risk Objective (1/2 * w^T * Sigma_stable * w)
@@ -209,14 +308,21 @@ class MeanVarianceOptimizer:
         # 3. Equality Constraint: h(w) = 0
         constraints = [
             # Budgets Constraints : sum(w) - 1 = 0
-            {"type": "eq", "fun": lambda w: np.sum(w) - 1, "jac": lambda w: np.ones(self.n_assets)},
+            {
+                "type": "eq",
+                "fun": lambda w: np.sum(w) - 1,
+                "jac": lambda w: np.ones(self.n_assets),
+            },
             # Return Constraint: w^T * mu - target_return = 0
-            {"type": "eq", "fun": lambda w: np.dot(w.T, self.mu) - target_return, "jac": lambda w: self.mu}
+            {
+                "type": "eq",
+                "fun": lambda w: np.dot(w.T, self.mu) - target_return,
+                "jac": lambda w: self.mu,
+            },
         ]
 
         # 4. Inequality Constraint (Bounds) : 0 <= w_i <= 1
         # Scipy's 'bounds' handles the KKT 'z' multiplier internally
-        
 
         # 5. Initial Guess (Equal Weights)
         w0 = np.ones(self.n_assets) / self.n_assets
@@ -230,14 +336,14 @@ class MeanVarianceOptimizer:
             bounds=self.bounds,
             constraints=constraints,
             jac=portfolio_variance_jacobian,
-            tol=1e-10
+            tol=1e-10,
         )
 
         if not result.success:
             raise ValueError(f"Optimization failed: {result.message}")
 
-        # Return as a clean dictionary
-        return dict(zip(self.tickers, result.x))
+        # Return as a pd.Series with canonical ticker order
+        return pd.Series(result.x, index=self.tickers, name="weights")
 
     def calculate_optimal_delta(self):
         T, N = self.returns.values.shape
@@ -247,29 +353,24 @@ class MeanVarianceOptimizer:
 
         gamma = np.linalg.norm(self.S - F, "fro") ** 2
 
-        Y = (self.returns - self.returns.mean()).values
+        Y = (self.returns - self.returns.mean()).values  # (T, N)
 
-        pi_matrix = []
-        for t in range(T):
-            realized_cov = np.outer(Y[t], Y[t])
-            pi_matrix.append((realized_cov - S) ** 2)
+        # pi: mean over t of sum of (realized_cov_t - S)^2; vectorized via (T, N, N)
+        realized_cov_all = Y[:, :, np.newaxis] * Y[:, np.newaxis, :]  # (T, N, N)
+        pi = np.sum(np.mean((realized_cov_all - S) ** 2, axis=0))
 
-        pi = np.sum(np.mean(pi_matrix, axis=0))
-
-        rho = 0
-        for i in range(N):
-            rho += np.mean(
-                [(Y[t, i] ** 2 - S[i, i]) * (avg_var - S[i, i]) for t in range(T)]
-            )
+        # rho: sum over i of mean over t of (Y[t,i]^2 - S[i,i]) * (avg_var - S[i,i])
+        diag_S = np.diag(S)
+        rho = np.sum(np.mean((Y**2 - diag_S) * (avg_var - diag_S), axis=0))
 
         delta_star = (1 / T) * (pi - rho) / gamma
         return max(0, min(delta_star, 1))
-
 
     def find_tangency_portfolio(
         self,
         risk_free_rate: float = 0.04,
         risk_free_rate_is_annual: bool = True,
+        covariance: Optional[pd.DataFrame] = None,
     ):
         """
         Solves for the Max Sharpe Ratio using the Charnes-Cooper Transformation.
@@ -280,6 +381,10 @@ class MeanVarianceOptimizer:
                 when risk_free_rate_is_annual is True, else same frequency as self.mu.
             risk_free_rate_is_annual: If True, risk_free_rate is in annual terms;
                 it is converted to daily via (1 + r_ann)^(1/252) - 1 to match self.mu.
+            covariance: Optional covariance matrix \\(\\Sigma\\) as a DataFrame.
+                If provided, it is **trusted as-is** and no internal shrinkage is
+                computed. Its units must match `self.mu` and the risk-free rate
+                after any conversion.
         """
         if risk_free_rate_is_annual:
             # Convert annual to daily: r_daily = (1 + r_ann)^(1/252) - 1
@@ -287,8 +392,30 @@ class MeanVarianceOptimizer:
         else:
             rf = float(risk_free_rate)
         mu_excess = self.mu - rf
-        delta = self.calculate_optimal_delta()
-        sigma = self._apply_ledoit_wolf_shrinkage(delta=delta)
+
+        if covariance is None:
+            delta = self.calculate_optimal_delta()
+            sigma_df = pd.DataFrame(
+                self._apply_ledoit_wolf_shrinkage(delta=delta),
+                index=self.tickers,
+                columns=self.tickers,
+            )
+        else:
+            if not isinstance(covariance, pd.DataFrame):
+                raise TypeError("covariance must be a pandas DataFrame.")
+            sigma_df = covariance.reindex(
+                index=self.tickers, columns=self.tickers
+            ).astype(float)
+            if bool(sigma_df.isna().to_numpy().any()):
+                raise ValueError(
+                    "covariance missing required tickers (NaNs after reindex)."
+                )
+
+        # Unit diagnostics for excess returns vs covariance
+        mu_excess_s = pd.Series(mu_excess, index=self.tickers, name="mu_excess")
+        self._validate_units(mu_excess_s, sigma_df)
+
+        sigma = np.asarray(sigma_df.values, dtype=float)
 
         def objective(y):
             return np.dot(y.T, np.dot(sigma, y))
@@ -297,7 +424,11 @@ class MeanVarianceOptimizer:
             return 2 * np.dot(sigma, y)
 
         constraints = [
-            {'type': 'eq', 'fun': lambda y: np.dot(mu_excess.T, y) - 1, 'jac': lambda y : mu_excess}
+            {
+                "type": "eq",
+                "fun": lambda y: np.dot(mu_excess.T, y) - 1,
+                "jac": lambda y: mu_excess,
+            }
         ]
 
         y_bounds = tuple((0, None) for _ in range(self.n_assets))
@@ -309,9 +440,9 @@ class MeanVarianceOptimizer:
             constraints=constraints,
             jac=obj_jacobian,
             bounds=y_bounds,
-            tol=1e-7
+            tol=1e-7,
         )
- 
+
         if not res.success:
             raise ValueError("CCT Optimization failed to converge.")
 
@@ -320,12 +451,12 @@ class MeanVarianceOptimizer:
 
         # Return and volatility are in same frequency as self.mu (e.g. daily)
         return {
-            'weights': pd.Series(weights, index=self.tickers),
-            'return': np.dot(self.mu, weights),
-            'volatility': np.sqrt(np.dot(weights.T, np.dot(sigma, weights)))
+            "weights": pd.Series(weights, index=self.tickers),
+            "return": np.dot(self.mu, weights),
+            "volatility": np.sqrt(np.dot(weights.T, np.dot(sigma, weights))),
         }
 
-    def generate_frontier(self, n_points: int=50):
+    def generate_frontier(self, n_points: int = 50):
         """
         Maps the Efficient Frontier using a sweep of target returns.
         Uses the 'Feasibility Check' logic to bound the search.
@@ -342,12 +473,24 @@ class MeanVarianceOptimizer:
         weights_list = []
         sigma = self._apply_ledoit_wolf_shrinkage(delta=delta)
 
+        sigma_df = pd.DataFrame(sigma, index=self.tickers, columns=self.tickers)
+        mu_s = pd.Series(self.mu, index=self.tickers, name="mu")
+        self._validate_units(mu_s, sigma_df)
+
         for target in target_returns:
             try:
                 # Capture target in closure (default arg) so each iteration uses its own target
                 constraints = [
-                    {'type': 'eq', 'fun': lambda w: np.sum(w) - 1, 'jac': lambda w: np.ones(self.n_assets)},
-                    {'type': 'eq', 'fun': lambda w, t=target: np.dot(w.T, self.mu) - t, 'jac': lambda w: self.mu}
+                    {
+                        "type": "eq",
+                        "fun": lambda w: np.sum(w) - 1,
+                        "jac": lambda w: np.ones(self.n_assets),
+                    },
+                    {
+                        "type": "eq",
+                        "fun": lambda w, t=target: np.dot(w.T, self.mu) - t,
+                        "jac": lambda w: self.mu,
+                    },
                 ]
 
                 res = minimize(
@@ -355,11 +498,11 @@ class MeanVarianceOptimizer:
                     x0=self.init_guess,
                     method="SLSQP",
                     constraints=constraints,
-                    bounds=self.bounds
+                    bounds=self.bounds,
                 )
 
-                w_dict = self.get_optimal_weights(target, delta=delta)
-                w_array = np.array([w_dict[t] for t in self.tickers])
+                w_series = self.get_optimal_weights(target, delta=delta)
+                w_array = w_series.reindex(self.tickers).to_numpy(dtype=float)
 
                 vol = np.sqrt(np.dot(w_array.T, np.dot(sigma, w_array)))
 
@@ -368,25 +511,24 @@ class MeanVarianceOptimizer:
                     frontier_rets.append(target)
                     # Use get_optimal_weights so graph matches run_analytics / compare_weights
                     weights_list.append(w_array)
-            except InfeasibleConstraintError:
+            except (InfeasibleConstraintError, ValueError):
                 continue
         return np.array(frontier_vols), np.array(frontier_rets), np.array(weights_list)
-            
-        
 
-    def compute_active_share(self, market_weights: pd.Series, portfolio_weights: pd.Series) -> float:
+    def compute_active_share(
+        self, market_weights: pd.Series, portfolio_weights: pd.Series
+    ) -> float:
         """
         Computes the Active Share of a portfolio compared to the market.
         """
         active_weights = portfolio_weights - market_weights
-        return (1/2) * np.sum(np.abs(active_weights))
+        return (1 / 2) * np.sum(np.abs(active_weights))
 
-    def compute_active_error(self, S, market_weights: pd.Series, portfolio_weights: pd.Series) -> float:
+    def compute_active_error(
+        self, S, market_weights: pd.Series, portfolio_weights: pd.Series
+    ) -> float:
         """
         Computes the Active Error of a portfolio compared to the market.
         """
         active_weights = portfolio_weights - market_weights
         return np.sqrt(np.dot(active_weights.T, np.dot(S, active_weights)))
-
-    
-

@@ -71,7 +71,7 @@ def plot_comprehensive_frontier(df_returns, optimizer, delta):
     ax2.set_ylim(0, 1)
     ax2.set_xlim(rets.min() * 252, rets.max() * 252)
 
-    plt.savefig("efficient_frontier.png", bbox_inches="tight", dpi=300)
+    plt.savefig("efficient_frontier.pdf", bbox_inches="tight", dpi=300)
     plt.show()
 
 

@@ -96,9 +96,9 @@ class BlackLittermanModel:
 
     def compute_omega(self, P, sigma, tau):
         P = np.array(P)
-        k = P.shape[0]
+        K = P.shape[0]
         omega_diag = []
-        for i in range(k):
+        for i in range(K):
             confidence_score = self.views[i]["confidence"]
             try:
                 omega_diag.append(

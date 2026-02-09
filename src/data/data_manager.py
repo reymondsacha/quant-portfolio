@@ -148,6 +148,11 @@ class DataManager:
         """
         Load a ticker's returns DataFrame from Parquet format.
         """
+        if not tickers:
+            raise ValueError(
+                "No tickers to load. Check that base_dir points to data/raw and contains "
+                "ticker subdirectories (e.g. run from project root or use base_dir=<path-to-data/raw>)."
+            )
         close_frames: list[pd.Series] = []
         for t in tickers:
             try:

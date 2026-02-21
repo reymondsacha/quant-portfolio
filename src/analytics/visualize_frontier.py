@@ -1,7 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from run_analytics import run_analytics
 
 
 def plot_comprehensive_frontier(df_returns, optimizer, delta):
@@ -76,6 +75,8 @@ def plot_comprehensive_frontier(df_returns, optimizer, delta):
 
 
 if __name__ == "__main__":
+    from run_analytics import run_analytics
+    
     result = run_analytics()
     if result is None:
         raise RuntimeError("run_analytics() returned None")

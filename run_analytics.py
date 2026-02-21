@@ -66,14 +66,12 @@ def run_analytics():
     )
     target_daily = tangency["return"]
     compare_weights(optimizer, target_daily, tangency_weights=tangency["weights"])
-
-    delta = optimizer.calculate_optimal_delta()
-    logging.info(f"Optimal Delta: {delta:.2f}")
+    logging.info(f"Optimal Delta: {optimizer.delta:.2f}")
 
     # 1. Reconstruct the Gradient of the Risk at the solution (use tangency weights)
     # Risk Gradient = Sigma * w
     w_array = np.array([tangency["weights"][ticker] for ticker in optimizer.tickers])
-    grad_risk = np.dot(optimizer._apply_ledoit_wolf_shrinkage(delta), w_array)
+    grad_risk = np.dot(optimizer._apply_ledoit_wolf_shrinkage(), w_array)
 
     # 2. Check Complementary Slackness: w_i * z_i should be 0
     # We can't see z directly easily, but we know that if w_i > 0,
@@ -93,8 +91,8 @@ def run_analytics():
     # Compute the condition number of the Raw vs Shrunk matrix
     cond_raw = np.linalg.cond(optimizer.S)
     cond_shrunk = np.linalg.cond(
-        (1 - delta) * optimizer.S
-        + delta
+        (1 - optimizer.delta) * optimizer.S
+        + optimizer.delta
         * (np.trace(optimizer.S) / optimizer.n_assets)
         * np.eye(optimizer.n_assets)
     )
@@ -102,14 +100,14 @@ def run_analytics():
     logging.info(f"Condition Number (Shrunk): {cond_shrunk:.2f}")
 
     # Annualized Portfolio Volatility: sqrt(w.T * Sigma * w) * sqrt(252)
-    w_dict = optimizer.get_optimal_weights(target_daily, delta=delta)
+    w_dict = optimizer.get_optimal_weights(target_daily)
     w_array = np.array([w_dict[ticker] for ticker in optimizer.tickers])
-    sigma_shrunk = optimizer._apply_ledoit_wolf_shrinkage(delta)
+    sigma_shrunk = optimizer._apply_ledoit_wolf_shrinkage()
     port_variance = np.dot(w_array.T, np.dot(sigma_shrunk, w_array))
     port_vol = np.sqrt(port_variance) * np.sqrt(252)
     logging.info(f"Expected Annual Volatility: {port_vol:.2%}")
 
-    return df_returns, optimizer, delta
+    return df_returns, optimizer, optimizer.delta
 
 
 def compare_weights(optimizer, target_return, tangency_weights=None):
@@ -118,10 +116,10 @@ def compare_weights(optimizer, target_return, tangency_weights=None):
     find_tangency_portfolio), the Shrunk column uses tangency weights so the
     table matches the tangency star on the frontier plot.
     """
-    delta = optimizer.calculate_optimal_delta()
     # 1. Raw Markowitz (δ = 0)
     try:
-        w_raw = optimizer.get_optimal_weights(target_return, delta=0.0)
+        sigma_raw_df = pd.DataFrame(optimizer.S, index=optimizer.tickers, columns=optimizer.tickers)
+        w_raw = optimizer.get_optimal_weights(target_return, covariance=sigma_raw_df)
     except ValueError:
         w_raw = "FAILED TO CONVERGE"
         logging.error("Raw Weights: Failed to converge")
@@ -130,7 +128,7 @@ def compare_weights(optimizer, target_return, tangency_weights=None):
     if tangency_weights is not None:
         w_shrunk = {t: float(tangency_weights[t]) for t in optimizer.tickers}
     else:
-        w_shrunk = optimizer.get_optimal_weights(target_return, delta=delta)
+        w_shrunk = optimizer.get_optimal_weights(target_return)
 
     print(f"\n{'Ticker':<10} | {'Raw Weights (%)':<15} | {'Shrunk/Tangency (%)':<15}")
     print("-" * 50)

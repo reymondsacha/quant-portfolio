@@ -2,7 +2,7 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 import logging
-from scipy.optimize import minimize
+from scipy.optimize import minimize, linprog
 from typing import Dict, Optional, cast
 
 logger = logging.getLogger("Optimizer")
@@ -44,6 +44,7 @@ class MeanVarianceOptimizer:
         self.S = np.asarray(returns.cov())
         self.bounds = tuple((0.0, 1.0) for _ in range(self.n_assets))
         self.init_guess = np.repeat(1.0 / self.n_assets, self.n_assets)
+        self.delta = None
 
     def _validate_units(self, mu: pd.Series, sigma_df: pd.DataFrame) -> None:
         """
@@ -92,6 +93,8 @@ class MeanVarianceOptimizer:
         max_weights: float = 0.5,
         long_only: bool = True,
         tol: float = 1e-12,
+        factor_exposure: Optional[pd.DataFrame] = None,
+        factor_limits: Optional[dict[int, float]] = None
     ) -> pd.Series:
         r"""
         Solve the canonical mean-variance utility problem:
@@ -119,6 +122,9 @@ class MeanVarianceOptimizer:
         Returns:
             pd.Series: Optimal weights indexed by tickers.
         """
+        if factor_exposure is not None and factor_limits is not None:
+            self.check_factor_feasibility(factor_exposure, factor_limits, max_weights)
+        
         if risk_aversion <= 0:
             raise ValueError("risk_aversion must be positive.")
 
@@ -176,6 +182,21 @@ class MeanVarianceOptimizer:
             },
         ]
 
+        if factor_exposure is not None:
+            if factor_limits is None:
+                raise ValueError("factor_limits must be provided if factor_exposure is provided.")
+            for k, limit in factor_limits.items():
+                constraints.append({
+                    "type": "ineq",
+                    "fun": lambda w, k=k, lim=limit: (factor_exposure[:, k] @ w) + lim,
+                    "jac": lambda w, k=k: factor_exposure[:, k]
+                })
+                constraints.append({
+                    "type": "ineq",
+                    "fun": lambda w, k=k, lim=limit: lim - (w @ factor_exposure[:, k]),
+                    "jac": lambda w, k=k: - factor_exposure[:, k]
+                })
+
         bounds = (
             tuple((0, max_weights) for _ in range(self.n_assets))
             if long_only
@@ -191,6 +212,7 @@ class MeanVarianceOptimizer:
             constraints=constraints,
             jac=objective_jacobian,
             tol=tol,
+            options={"maxiter": 1000},
         )
 
         if not result.success:
@@ -198,10 +220,12 @@ class MeanVarianceOptimizer:
 
         return pd.Series(result.x, index=self.tickers, name="weights")
 
-    def _apply_ledoit_wolf_shrinkage(self, delta) -> np.ndarray:
+    def _apply_ledoit_wolf_shrinkage(self) -> np.ndarray:
         """
         Lifts the eigenvalue spectrum by shrinking S toward the Identity target.
         """
+        if self.delta is None:
+            self.calculate_optimal_delta()
         # Average Variance (1/n * Tr(S))
         avg_var = np.trace(self.S) / self.n_assets
 
@@ -209,7 +233,7 @@ class MeanVarianceOptimizer:
         F = avg_var * np.eye(self.n_assets)
 
         # Shrunk Matrix Sigma_stable = (1-delta) * S + delta * F
-        return (1 - delta) * self.S + delta * F
+        return (1 - self.delta) * self.S + self.delta * F
 
     def check_feasibility(
         self, target_return: float, sigma: npt.NDArray[np.floating]
@@ -237,14 +261,67 @@ class MeanVarianceOptimizer:
 
         return True
 
+
+    def check_factor_feasibility(
+        self, 
+        factor_exposure: pd.DataFrame, 
+        factor_limits: Dict[int, float], 
+        max_weight: float = 1.0
+    ) -> bool:
+        """
+        Checks if a feasible portfolio exists given the factor constraints.
+        Returns True if feasible, raises InfeasibleConstraintError otherwise.
+        """
+        n_assets = self.n_assets
+        # Objective: We don't care about the result, just feasibility. 
+        # We use a dummy objective (all zeros).
+        c = np.zeros(n_assets)
+
+        # Equality Constraints: sum(w) = 1
+        A_eq = [np.ones(n_assets)]
+        b_eq = [1.0]
+
+        # Inequality Constraints: factor_exposure @ w <= limit AND -factor_exposure @ w <= limit
+        A_ub = []
+        b_ub = []
+    
+        for k, limit in factor_limits.items():
+            v_k = factor_exposure[:, k]
+            A_ub.append(v_k)        # v_k @ w <= limit
+            b_ub.append(limit)
+            A_ub.append(-v_k)       # -v_k @ w <= limit (same as v_k @ w >= -limit)
+            b_ub.append(limit)
+
+        # Bounds: 0 <= w_i <= max_weight
+        bounds = [(0, max_weight) for _ in range(n_assets)]
+
+        # Solve the LP
+        res = linprog(c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, bounds=bounds, method='highs')
+
+        if not res.success:
+            # Diagnostic: Find which factor is the likely culprit
+            problematic_factors = []
+            for k, limit in factor_limits.items():
+                v_k = factor_exposure[:, k]
+                # If the best an asset can do is higher than the limit, it's a conflict
+                if np.min(v_k) > limit or np.max(v_k) < -limit:
+                    problematic_factors.append(k)
+        
+            raise InfeasibleConstraintError(
+                f"Factor constraints are too tight. No feasible weights found. "
+                f"Check factors: {problematic_factors}"
+            )
+    
+        return True
+
     def calculate_risk_decomposition(
-        self, weights_dict: Dict[str, float], delta: float
+        self, weights_dict: Dict[str, float]
     ) -> pd.DataFrame:
         """
         Implements the Euler Identity: sigma_p = sum(w_i * MCR_i).
-        """
+        """   
         w = np.array([weights_dict[ticker] for ticker in self.tickers])
-        sigma = self._apply_ledoit_wolf_shrinkage(delta)
+        sigma = self._apply_ledoit_wolf_shrinkage()
 
         # Portfolio Volatility: sqrt(w^T * sigma * w)
         port_vol = np.sqrt(w.T @ sigma @ w)
@@ -260,11 +337,43 @@ class MeanVarianceOptimizer:
             index=pd.Index(self.tickers),
         )
 
+    def calculate_idiosyncratic_risk(self, weights_dict: Dict[str, float], eigenvectors: npt.NDArray[np.floating], k: int = 3, covariance: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+        """
+        Calculates the factor variance attribution using the Systematic Projection method.
+        This prevents negative idiosyncratic risk by ensuring both components derive from the same Sigma.
+        """
+        # 1. Handle Covariance Source
+        if covariance is None:
+            Sigma = self._apply_ledoit_wolf_shrinkage()
+        else:
+            Sigma = np.asarray(covariance.values, dtype=float)
+
+        w = np.array([weights_dict[ticker] for ticker in self.tickers])
+        
+        # 2. Total Portfolio Variance
+        total_risk = w.T @ Sigma @ w
+        
+        # 3. Systematic Risk via Projection
+        # We project the Covariance matrix itself onto the top K eigenvectors
+        # Systematic_Sigma = V @ V.T @ Sigma @ V @ V.T
+        V = eigenvectors[:, :k]
+        P = V @ V.T  # Projection Matrix
+        systematic_sigma = P @ Sigma @ P
+        
+        factor_risk = w.T @ systematic_sigma @ w
+        idiosyncratic_risk = total_risk - factor_risk
+
+        return pd.DataFrame(
+            {"Factor_Risk": factor_risk, "Idiosyncratic_Risk": max(0, idiosyncratic_risk)},
+            index=["Variance"]
+        )
+        
     def get_optimal_weights(
         self,
         target_return: float,
-        delta: float,
         covariance: Optional[pd.DataFrame] = None,
+        factor_exposure: Optional[pd.DataFrame] = None,
+        factor_limits: Optional[dict[int, float]] = None
     ) -> pd.Series:
         """
         Solves the KKT system for a Long Only Portfolio.
@@ -275,9 +384,12 @@ class MeanVarianceOptimizer:
             - If `covariance` is provided it is **used as-is** and no
               internal shrinkage is computed.
         """
+        if factor_exposure is not None and factor_limits is not None:
+            self.check_factor_feasibility(factor_exposure, factor_limits)
+        
         # 1. Get the Stabilized Covariance Matrix (or trust injected covariance)
         if covariance is None:
-            sigma_stable = self._apply_ledoit_wolf_shrinkage(delta)
+            sigma_stable = self._apply_ledoit_wolf_shrinkage()
             sigma_df = pd.DataFrame(
                 sigma_stable, index=self.tickers, columns=self.tickers
             )
@@ -321,6 +433,22 @@ class MeanVarianceOptimizer:
             },
         ]
 
+        if factor_exposure is not None:
+            if factor_limits is None:
+                raise ValueError("factor_limits must be provided if factor_exposure is provided.")
+            for k, limit in factor_limits.items():
+                constraints.append({
+                    "type": "ineq",
+                    "fun": lambda w, k=k, lim=limit: lim - (w @ factor_exposure[:, k]),
+                    "jac": lambda w, k=k: - factor_exposure[:, k]
+                })
+
+                constraints.append({
+                    "type": "ineq",
+                    "fun": lambda w, k=k, lim=limit: lim + (w @ factor_exposure[:, k]),
+                    "jac": lambda w, k=k: factor_exposure[:, k]
+                })
+
         # 4. Inequality Constraint (Bounds) : 0 <= w_i <= 1
         # Scipy's 'bounds' handles the KKT 'z' multiplier internally
 
@@ -337,6 +465,7 @@ class MeanVarianceOptimizer:
             constraints=constraints,
             jac=portfolio_variance_jacobian,
             tol=1e-10,
+            options={"maxiter": 1000},
         )
 
         if not result.success:
@@ -364,15 +493,18 @@ class MeanVarianceOptimizer:
         rho = np.sum(np.mean((Y**2 - diag_S) * (avg_var - diag_S), axis=0))
 
         delta_star = (1 / T) * (pi - rho) / gamma
-        return max(0, min(delta_star, 1))
+        self.delta = max(0, min(delta_star, 1))
+        return self.delta
 
     def find_tangency_portfolio(
         self,
         risk_free_rate: float = 0.04,
         risk_free_rate_is_annual: bool = True,
         covariance: Optional[pd.DataFrame] = None,
+        factor_exposure: Optional[pd.DataFrame] = None,
+        factor_limits: Optional[dict[int, float]] = None
     ):
-        """
+        r"""
         Solves for the Max Sharpe Ratio using the Charnes-Cooper Transformation.
         Minimizes y.T @ Sigma @ y s.t. (mu - rf1).T @ y = 1
 
@@ -386,6 +518,9 @@ class MeanVarianceOptimizer:
                 computed. Its units must match `self.mu` and the risk-free rate
                 after any conversion.
         """
+        if factor_exposure is not None and factor_limits is not None:
+            self.check_factor_feasibility(factor_exposure, factor_limits)
+
         if risk_free_rate_is_annual:
             # Convert annual to daily: r_daily = (1 + r_ann)^(1/252) - 1
             rf = float((1.0 + risk_free_rate) ** (1.0 / 252.0) - 1.0)
@@ -394,9 +529,8 @@ class MeanVarianceOptimizer:
         mu_excess = self.mu - rf
 
         if covariance is None:
-            delta = self.calculate_optimal_delta()
             sigma_df = pd.DataFrame(
-                self._apply_ledoit_wolf_shrinkage(delta=delta),
+                self._apply_ledoit_wolf_shrinkage(),
                 index=self.tickers,
                 columns=self.tickers,
             )
@@ -431,6 +565,22 @@ class MeanVarianceOptimizer:
             }
         ]
 
+        if factor_exposure is not None:
+            if factor_limits is None:
+                raise ValueError("factor_limits must be provided if factor_exposure is provided.")
+            for k, limit in factor_limits.items():
+                constraints.append({
+                    "type": "ineq",
+                    "fun": lambda y, k=k, lim=limit: lim * y.sum() - (y.T @ factor_exposure[:, k]),
+                    "jac": lambda y, k=k, lim=limit: lim * np.ones(self.n_assets) - factor_exposure[:, k]
+                })
+
+                constraints.append({
+                    "type": "ineq",
+                    "fun": lambda y, k=k, lim=limit: (y.T @ factor_exposure[:, k]) + lim * y.sum(),
+                    "jac": lambda y, k=k, lim=limit: lim * np.ones(self.n_assets) + factor_exposure[:, k]
+                })
+
         y_bounds = tuple((0, None) for _ in range(self.n_assets))
 
         res = minimize(
@@ -441,6 +591,7 @@ class MeanVarianceOptimizer:
             jac=obj_jacobian,
             bounds=y_bounds,
             tol=1e-7,
+            options={"maxiter": 1000},
         )
 
         if not res.success:
@@ -465,13 +616,13 @@ class MeanVarianceOptimizer:
         """
         min_ret = np.min(self.mu)
         max_ret = np.max(self.mu)
-        delta = self.calculate_optimal_delta()
+        self.calculate_optimal_delta()
 
         target_returns = np.linspace(min_ret * 1.01, max_ret * 0.99, n_points)
         frontier_vols = []
         frontier_rets = []
         weights_list = []
-        sigma = self._apply_ledoit_wolf_shrinkage(delta=delta)
+        sigma = self._apply_ledoit_wolf_shrinkage()
 
         sigma_df = pd.DataFrame(sigma, index=self.tickers, columns=self.tickers)
         mu_s = pd.Series(self.mu, index=self.tickers, name="mu")
@@ -479,39 +630,18 @@ class MeanVarianceOptimizer:
 
         for target in target_returns:
             try:
-                # Capture target in closure (default arg) so each iteration uses its own target
-                constraints = [
-                    {
-                        "type": "eq",
-                        "fun": lambda w: np.sum(w) - 1,
-                        "jac": lambda w: np.ones(self.n_assets),
-                    },
-                    {
-                        "type": "eq",
-                        "fun": lambda w, t=target: np.dot(w.T, self.mu) - t,
-                        "jac": lambda w: self.mu,
-                    },
-                ]
-
-                res = minimize(
-                    lambda w: np.dot(w.T, np.dot(sigma, w)),
-                    x0=self.init_guess,
-                    method="SLSQP",
-                    constraints=constraints,
-                    bounds=self.bounds,
-                )
-
-                w_series = self.get_optimal_weights(target, delta=delta)
+                # Get optimal weights using the consistent method from run_analytics
+                w_series = self.get_optimal_weights(target)
                 w_array = w_series.reindex(self.tickers).to_numpy(dtype=float)
 
+                # Calculate volatility using the shrunk covariance matrix
                 vol = np.sqrt(np.dot(w_array.T, np.dot(sigma, w_array)))
 
-                if res.success:
-                    frontier_vols.append(vol)
-                    frontier_rets.append(target)
-                    # Use get_optimal_weights so graph matches run_analytics / compare_weights
-                    weights_list.append(w_array)
-            except (InfeasibleConstraintError, ValueError):
+                frontier_vols.append(vol)
+                frontier_rets.append(target)
+                weights_list.append(w_array)
+            except (InfeasibleConstraintError, ValueError) as e:
+                # Skip infeasible points (outside the feasible range)
                 continue
         return np.array(frontier_vols), np.array(frontier_rets), np.array(weights_list)
 

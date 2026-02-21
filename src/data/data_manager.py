@@ -186,6 +186,7 @@ class DataManager:
         else:
             returns = np.log(prices / prices.shift(1))
 
+        returns = returns.clip(lower=-0.5, upper=0.5)
         return returns.dropna(how="any")
 
     def save_metadata(self, metadata_list: list[dict]) -> Path:

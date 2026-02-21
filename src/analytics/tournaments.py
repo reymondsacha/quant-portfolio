@@ -4,6 +4,9 @@ import yfinance as yf
 from src.analytics.black_litterman import BlackLittermanModel
 from src.analytics.mvo_optimizer import MeanVarianceOptimizer
 from src.analytics.hrp_optimizer import HrpOptimizer
+import logging
+
+logger = logging.getLogger("PortfolioTournament")
 
 
 class PortfolioTournament:
@@ -43,24 +46,20 @@ class PortfolioTournament:
     
         # 3 - BLACK LITTERMAN
 
-        benchmark_return = 0.08
-        w_mkt_arr = w_mkt.to_numpy(dtype=float)  # w_mkt already aligned to self.tickers
-        var_mkt = float(w_mkt_arr.T @ self.sigma_ann @ w_mkt_arr)
-        lambda_reg = self.bl_helper.calculate_risk_aversion(benchmark_return=benchmark_return, benchmark_var=var_mkt)
-        Pi = self.bl_helper.calculate_implied_returns(covariance=self.sigma_ann_df, market_weights=w_mkt, risk_aversion=lambda_reg)
-        self.bl_helper.views = []
-
         self.bl_helper.add_view({"AAPL": 1.0}, 0.10, confidence_score=0.3)
         self.bl_helper.add_view({"AAPL": 0.5, "MSFT": 0.5, "GOOGL": -1.0}, 0.02, confidence_score=0.5)
-    
-        tau = 0.025    
-        P, Q = self.bl_helper._build_matrices(self.tickers)
-        Omega = self.bl_helper.compute_omega(P, self.sigma_ann, tau)
-        E = self.bl_helper.get_posterior_returns(Pi, self.sigma_ann, P, Q, Omega, tau)
+
+        E = self.bl_helper.get_posterior_returns(
+            self.sigma_ann_df,
+            tau = 0.025,
+            market_caps=market_caps,
+            benchmark_return=0.08
+        )
+
         results["Black_Litterman"] = self.mvo.solve(
             expected_returns=E, 
             covariance=self.sigma_ann_df, 
-            risk_aversion=lambda_reg
+            risk_aversion=self.bl_helper.lambda_reg
         )
 
         # 4 - HRP : Risk topology

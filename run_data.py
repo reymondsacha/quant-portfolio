@@ -90,24 +90,21 @@ def run_pipeline(tickers: List[str], start_date: str, end_date: str, load_ticker
 
 def main():
     # Define the list of core tickers to ingest
-    CORE_TICKERS = [
-    "AAPL", "MSFT", "GOOGL", "AMZN", "META",
-    "NVDA", "TSLA", "JPM", "V",
-    "MA", "UNH", "JNJ", "PG", "KO",
-    "PEP", "XOM", "CVX", "TTE", "SHEL",
-    "HD", "MCD", "DIS", "NFLX", "ORCL",
-    "INTC", "CSCO", "AVGO", "ADBE", "CRM",
-    "LIN", "NVO", "ASML", "SAP", "TM",
-    "BABA", "NKE", "PFE", "MRK", "ABBV",
-    "MC.PA", "AIR.PA", "SAN.PA","BNP.PA","SU.PA",
-    "RMS.PA","DG.PA", "OR.PA", "TTE.PA", "UL", "RIO"
-]
+    CORE_TICKERS = ['AAPL', 'ABBV', 'ADBE', 'AIR.PA', 
+    'AMZN', 'ASML', 'AVGO', 'BABA', 'BNP.PA', 'CRM', 
+    'CSCO', 'CVX', 'DG.PA', 'DIS', 'GOOGL', 'HD', 
+    'INTC', 'JNJ', 'JPM', 'KO', 'LIN', 'MA', 'MC.PA', 
+    'MCD', 'META', 'MRK', 'MSFT', 'NFLX', 'NKE', 'NVDA', 
+    'NVO', 'OR.PA', 'ORCL', 'PEP', 'PFE', 'PG', 'RIO', 
+    'RMS.PA', 'SAN.PA', 'SAP', 'SHEL', 'SU.PA', 'TM', 
+    'TSLA', 'TTE', 'TTE.PA', 'UL', 'UNH', 'V', 'XOM'
+    ]
 
     # Define the primary configuration (Dates)
     START_DATE = "2020-01-01"
-    END_DATE = "2023-12-31"
+    END_DATE = "2025-12-31"
 
-    run_pipeline(CORE_TICKERS, START_DATE, END_DATE, load_ticker=False, load_metadata=True)
+    run_pipeline(CORE_TICKERS, START_DATE, END_DATE, load_ticker=True, load_metadata=True)
 
 
 if __name__ == "__main__":

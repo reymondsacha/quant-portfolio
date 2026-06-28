@@ -15,7 +15,8 @@ dependencies = [
     "yfinance (>=0.2.66,<0.3.0)",
     "pyarrow (>=22.0.0,<23.0.0)",
     "seaborn (>=0.13.2,<0.14.0)",
-    "statsmodels (>=0.14.6,<0.15.0)"
+    "statsmodels (>=0.14.6,<0.15.0)",
+    "plotly (>=6.6.0,<7.0.0)"
 ]
 
 [tool.poetry]

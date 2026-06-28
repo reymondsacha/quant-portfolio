@@ -58,25 +58,25 @@ class Backtest:
 
             # ROUTER: Dispatch event to the correct handler
             if event is not None:
-                # 1. MARKET DATA -- STRATEGY
+                # 1. MARKET DATA - STRATEGY
                 if event.type == EventType.MARKET:
                     self.strategy.calculate_signals(event)
                     self.portfolio.update_timeindex(event)
 
-                # 2. SIGNAL -- PORTFOLIO
+                # 2. SIGNAL - PORTFOLIO
                 elif event.type == EventType.SIGNAL:
                     logger.info(f">>> SIGNAL DETECTED: {event.symbol} {event.side}")
                     # Portfolio decides if the trade can be afforded
                     self.portfolio.update_signal(event)
 
-                # 3. ORDER -- EXECUTION
+                # 3. ORDER - EXECUTION
                 elif event.type == EventType.ORDER:
                     logger.info(
                         f">>> ORDER GENERATED: {event.symbol} {event.direction} {event.quantity}"
                     )
                     self.execution_handler.execute_order(event)
 
-                # 4. FILL -- PORTFOLIO
+                # 4. FILL - PORTFOLIO
                 elif event.type == EventType.FILL:
                     self.portfolio.update_fill(event)
 

@@ -14,7 +14,7 @@ def plot_comprehensive_frontier(df_returns, optimizer, delta):
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 14), gridspec_kw={"hspace": 0.3})
 
-    # --- Plot 1: The Efficient Frontier ---
+    # Plot 1: The Efficient Frontier 
     ax1.plot(vols * np.sqrt(252), rets * 252, "b-", lw=3, label="Efficient Frontier")
 
     # Plot Individual Assets (align to optimizer.tickers to avoid wrong-ticker assignment)
@@ -49,7 +49,7 @@ def plot_comprehensive_frontier(df_returns, optimizer, delta):
     ax1.legend(loc="upper left", frameon=True, shadow=True)
     ax1.grid(True, linestyle=":", alpha=0.6)
 
-    # --- Plot 2: Weight Transition Plot ---
+    # Plot 2: Weight Transition Plot 
     df_w = pd.DataFrame(weights, index=rets * 252, columns=optimizer.tickers)
     df_w.plot.area(ax=ax2, colormap="tab20b", alpha=0.9)
 

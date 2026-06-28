@@ -71,7 +71,7 @@ class HrpOptimizer:
 
     def get_sorted_tickers(self):
         """
-        Returns the lit of tickers in quasi-diagonal order.
+        Returns the list of tickers in quasi-diagonal order.
         """
         indices = self.get_quasi_diag()
         return [self.tickers[i] for i in indices]
@@ -92,8 +92,8 @@ class HrpOptimizer:
         Recursive bisection of the covariance matrix.
 
         Returns:
-            pd.Series: HRP weights indexed by **sorted tickers** in quasi-diagonal
-            order corresponding to `sorted_indices`. Use `get_sorted_tickers()`
+            pd.Series: HRP weights indexed by sorted tickers in quasi-diagonal
+            order corresponding to sorted_indices. Use get_sorted_tickers()
             if you need the explicit ticker order.
         """
         # Ensure covariance has rows/columns in self.tickers order (sorted_indices are

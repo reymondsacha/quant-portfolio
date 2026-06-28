@@ -25,15 +25,9 @@ class BlackLittermanModel:
             - `self.rf` is treated as **annual** (e.g. 0.04).
             - All other inputs/outputs (benchmark_return, benchmark_var, covariance,
               implied returns, posterior returns) must share a common frequency
-              (typically annual). See UNITS.md.
+              (typically annual).
             - `self.frequency` is the number of periods per year (default 252),
               exposed for consistency with other optimizers and documentation.
-        
-        Usage:
-            # Simple usage - just add views and call get_posterior_returns
-            bl = BlackLittermanModel(market_caps=market_caps, benchmark_return=0.10)
-            bl.add_view({'AAPL': 1.0}, target_return=0.15, confidence_score=0.5)
-            posterior_returns = bl.get_posterior_returns(sigma_ann, tau=0.025)
         """
         self.rf: float = float(risk_free_rate)
         self.frequency: int = int(frequency)

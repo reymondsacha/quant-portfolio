@@ -84,10 +84,10 @@ class DataManager:
                     temp_path,
                     engine="pyarrow",
                     compression="snappy",
-                    index=True,  # Explicitly preserve the Date index
+                    index=True,  
                 )
 
-                # 2. Atomic Rename (The Swap)
+                # 2. Atomic Rename 
                 temp_path.replace(file_path)
 
             except Exception as e:

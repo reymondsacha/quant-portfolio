@@ -68,12 +68,12 @@ class SmaCrossStrategy(Strategy):
 
             # 3. Calculate SMAs (The "Thinking")
 
-            # --- Current Step (t) ---
+            # Current Step (t)
             # Slicing: take the last N items
             short_sma_t = np.mean(closes[-self.short_window :])
             long_sma_t = np.mean(closes[-self.long_window :])
 
-            # --- Previous Step (t-1) ---
+            # Previous Step (t-1) 
             # Slicing: take from -(N+1) up to -1 (excluding the current bar)
             short_sma_prev = np.mean(closes[-self.short_window - 1 : -1])
             long_sma_prev = np.mean(closes[-self.long_window - 1 : -1])

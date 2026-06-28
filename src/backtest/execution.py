@@ -48,7 +48,6 @@ class SimulatedExecutionHandler(ExecutionHandler):
         if event.type == "ORDER":
             # 1. Define Execution Details
             # We assume immediate fill
-            # "ARCA" is a placeholder for the exchange
 
             # Hardcoded commission per trade (Simulating a broker fee)
             commission = 1.0

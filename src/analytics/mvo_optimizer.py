@@ -29,10 +29,9 @@ class MeanVarianceOptimizer:
             - Assumes `returns` are in a single-period frequency (e.g. **daily**).
             - `self.mu` and `self.S` are in that same frequency (e.g. daily).
             - `self.frequency` is the number of periods per year (default 252).
-              It is only used for unit diagnostics and documentation – it does
-              **not** rescale inputs automatically.
+              It is only used for unit diagnostics and documentation, it does
+              not rescale inputs automatically.
 
-        See UNITS.md for the full convention.
         """
         self.returns = returns
         self.tickers = list(returns.columns)
@@ -52,9 +51,9 @@ class MeanVarianceOptimizer:
         expected returns and covariance.
 
         Heuristic:
-            - If |mu| is "annual-like" (~5–50%) **and**
+            - If |mu| is "annual-like" (~5–50%) and
               diag(cov) is "daily-like" (~1e-6–1e-3), we raise.
-            - Conversely, if |mu| is "daily-like" (~0–1%) **and**
+            - Conversely, if |mu| is "daily-like" (~0–1%) and
               diag(cov) is "annual-like" (> 1e-2), we also raise.
         """
         if sigma_df.shape[0] != sigma_df.shape[1]:
@@ -66,7 +65,7 @@ class MeanVarianceOptimizer:
 
         # Basic sanity: non-negative variance
         if mean_var < 0:
-            raise ValueError("covariance has negative average variance – invalid input.")
+            raise ValueError("covariance has negative average variance, invalid input.")
 
         # Guard: annual mu with daily cov
         if 0.05 <= mean_abs_mu <= 0.5 and 0.0 < mean_var <= 1e-3:
@@ -97,27 +96,8 @@ class MeanVarianceOptimizer:
         factor_limits: Optional[dict[int, float]] = None
     ) -> pd.Series:
         r"""
-        Solve the canonical mean-variance utility problem:
+        Solve the canonical mean-variance utility problem.
 
-        \[
-            \\max_w \\; \\mu^T w - \\frac{\\lambda}{2} w^T \\Sigma w
-            \\quad \\text{s.t.} \\quad \\mathbf{1}^T w = 1
-        \\]
-
-        This formulation is the correct "equilibrium check" for Black–Litterman:
-        if \\(\\Pi = \\lambda \\Sigma w_{mkt}\\) and there are no binding constraints,
-        the optimizer recovers \\(w_{mkt}\\).
-
-        Args:
-            expected_returns: Expected returns \\(\\mu\\) as a Series indexed by tickers.
-                If None, uses the sample mean from `self.returns`.
-                Units: Must match covariance (both daily or both annual). Do not mix.
-            covariance: Covariance matrix \\(\\Sigma\\) as a DataFrame with matching
-                index/columns. If None, uses the sample covariance from `self.returns`.
-                Units: Must match expected_returns (both daily or both annual). Do not mix.
-            risk_aversion: Risk aversion \\(\\lambda > 0\\).
-            long_only: If True, enforce \\(0 \\le w_i \\le 1\\).
-            tol: Numerical tolerance passed to SLSQP.
 
         Returns:
             pd.Series: Optimal weights indexed by tickers.
@@ -381,7 +361,7 @@ class MeanVarianceOptimizer:
         Units:
             - `target_return` must be in the same frequency as `self.mu`
               and `covariance` (e.g. all daily or all annual).
-            - If `covariance` is provided it is **used as-is** and no
+            - If `covariance` is provided it is used as-is and no
               internal shrinkage is computed.
         """
         if factor_exposure is not None and factor_limits is not None:
@@ -509,12 +489,12 @@ class MeanVarianceOptimizer:
         Minimizes y.T @ Sigma @ y s.t. (mu - rf1).T @ y = 1
 
         Args:
-            risk_free_rate: Risk-free rate. Interpreted as **annual** (e.g. 0.04)
+            risk_free_rate: Risk-free rate. Interpreted as annual (e.g. 0.04)
                 when risk_free_rate_is_annual is True, else same frequency as self.mu.
             risk_free_rate_is_annual: If True, risk_free_rate is in annual terms;
                 it is converted to daily via (1 + r_ann)^(1/252) - 1 to match self.mu.
-            covariance: Optional covariance matrix \\(\\Sigma\\) as a DataFrame.
-                If provided, it is **trusted as-is** and no internal shrinkage is
+            covariance: Optional covariance matrix Sigma as a DataFrame.
+                If provided, it is trusted as-is and no internal shrinkage is
                 computed. Its units must match `self.mu` and the risk-free rate
                 after any conversion.
         """
